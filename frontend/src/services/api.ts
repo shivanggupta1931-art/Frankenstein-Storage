@@ -1,14 +1,51 @@
 import { Drive, StoredFile, PoolOverview, Chunk, ActivityItem, UploadPreference, ExternalUsbDrive } from "../types";
 
-const DEFAULT_BASE_URL = "http://127.0.0.1:8765/api/v1";
+const getInitialBaseUrl = (): string => {
+  // 1. Saved localStorage preference
+  const saved = localStorage.getItem("frankenstein_api_url");
+  if (saved && saved.trim()) {
+    return saved.trim();
+  }
+
+  // 2. First-class Vite environment variable (e.g. Vercel deployment pointing to backend)
+  const envApiUrl = import.meta.env.VITE_API_URL;
+  if (envApiUrl && typeof envApiUrl === "string" && envApiUrl.trim()) {
+    const trimmed = envApiUrl.trim().replace(/\/$/, "");
+    return trimmed.endsWith("/api/v1") ? trimmed : `${trimmed}/api/v1`;
+  }
+
+  // 3. Single-port injected token or URL from FastAPI server
+  if (typeof window !== "undefined") {
+    const injected = (window as any).__FRANKENSTEIN_API_URL__;
+    if (injected) return injected;
+    if ((window as any).__FRANKENSTEIN_SESSION_TOKEN__) {
+      return `${window.location.origin}/api/v1`;
+    }
+
+    // 4. If hosted on a remote domain (e.g. Vercel, Render, Railway, or custom domain), default to same-origin /api/v1
+    const host = window.location.hostname;
+    if (host && host !== "localhost" && host !== "127.0.0.1" && host !== "[::1]") {
+      return `${window.location.origin}/api/v1`;
+    }
+  }
+
+  // 5. Default fallback to local development server
+  return "http://127.0.0.1:8765/api/v1";
+};
 
 class ApiService {
   private baseUrl: string;
   private token: string;
 
   constructor() {
-    this.baseUrl = localStorage.getItem("frankenstein_api_url") || DEFAULT_BASE_URL;
-    this.token = localStorage.getItem("frankenstein_token") || "frankenstein-demo-token";
+    this.baseUrl = getInitialBaseUrl();
+    const injectedToken = typeof window !== "undefined" ? (window as any).__FRANKENSTEIN_SESSION_TOKEN__ : null;
+    if (injectedToken) {
+      this.token = injectedToken;
+      localStorage.setItem("frankenstein_token", injectedToken);
+    } else {
+      this.token = localStorage.getItem("frankenstein_token") || "frankenstein-demo-token";
+    }
   }
 
   getBaseUrl(): string {

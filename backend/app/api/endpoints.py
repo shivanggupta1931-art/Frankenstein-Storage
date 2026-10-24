@@ -20,7 +20,11 @@ router = APIRouter(prefix="/api/v1")
 
 def require_unlocked() -> None:
     if not key_manager.is_unlocked():
-        raise AppError(403, "VAULT_LOCKED", "Storage vault is locked. Please unlock with master password first.")
+        raise AppError(
+            403,
+            "VAULT_LOCKED",
+            "Storage vault is locked. Please unlock with master password first.",
+        )
 
 
 class UnlockRequest(BaseModel):
@@ -175,7 +179,10 @@ def setup_real_drives():
         locs = [
             ("Macintosh HD (Documents Pool)", str(home / "Documents" / "FrankensteinStorage")),
             ("Macintosh HD (Downloads Pool)", str(home / "Downloads" / "FrankensteinStorage")),
-            ("Macintosh HD (Local Fast SSD)", str(home / ".frankenstein" / "storage" / "primary_ssd")),
+            (
+                "Macintosh HD (Local Fast SSD)",
+                str(home / ".frankenstein" / "storage" / "primary_ssd"),
+            ),
         ]
         for name, p in locs:
             try:
@@ -299,7 +306,7 @@ def get_files(
                 stripes: dict[int, list[dict[str, Any]]] = {}
                 for c in chunks:
                     stripes.setdefault(c["stripe_index"], []).append(c)
-                
+
                 degraded = False
                 unavailable = False
                 for s_idx, s_chunks in stripes.items():
@@ -353,7 +360,7 @@ def download_file(file_id: str):
     conn = create_connection()
     try:
         meta, generator, _tracker = storage_engine.download_stream(conn, file_id)
-        
+
         def cleanup_generator():
             try:
                 yield from generator
@@ -361,10 +368,11 @@ def download_file(file_id: str):
                 conn.close()
 
         import urllib.parse
+
         ascii_filename = meta["name"].encode("ascii", "replace").decode().replace("?", "_")
         encoded_filename = urllib.parse.quote(meta["name"])
         headers = {
-            "Content-Disposition": f'attachment; filename="{ascii_filename}"; filename*=UTF-8\'\'{encoded_filename}',
+            "Content-Disposition": f"attachment; filename=\"{ascii_filename}\"; filename*=UTF-8''{encoded_filename}",
             "Content-Length": str(meta["size"]),
             "X-File-SHA256": meta["sha256"],
             "X-Rebuilt-From-Parity": "true" if _tracker.get("was_rebuilt") else "false",
@@ -393,7 +401,7 @@ def preview_file(file_id: str):
     ascii_filename = meta["name"].encode("ascii", "replace").decode().replace("?", "_")
     encoded_filename = urllib.parse.quote(meta["name"])
     headers = {
-        "Content-Disposition": f'inline; filename="{ascii_filename}"; filename*=UTF-8\'\'{encoded_filename}',
+        "Content-Disposition": f"inline; filename=\"{ascii_filename}\"; filename*=UTF-8''{encoded_filename}",
         "Content-Length": str(len(content)),
         "Accept-Ranges": "bytes",
     }
@@ -454,5 +462,7 @@ def get_activity_log():
     require_unlocked()
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT id, operation, details, status, created_at FROM operation_log ORDER BY id DESC LIMIT 50")
+        cursor.execute(
+            "SELECT id, operation, details, status, created_at FROM operation_log ORDER BY id DESC LIMIT 50"
+        )
         return [dict(row) for row in cursor.fetchall()]

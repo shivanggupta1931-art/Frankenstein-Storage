@@ -37,7 +37,9 @@ async def test_migration_and_upload_preferences_api(async_client, test_env):
     assert res.json()["preferred_mode"] == "whole"
 
     # 4. Update preference to 'chunked_parity'
-    res = await async_client.put("/api/v1/settings/preferences", json={"preferred_mode": "chunked_parity"})
+    res = await async_client.put(
+        "/api/v1/settings/preferences", json={"preferred_mode": "chunked_parity"}
+    )
     assert res.status_code == 200
     assert res.json()["preferred_mode"] == "chunked_parity"
 
@@ -55,7 +57,9 @@ async def test_migration_and_upload_preferences_api(async_client, test_env):
 async def test_backend_rejection_of_unsupported_storage_modes(async_client, test_env):
     """Test 6: Backend rejection of unsupported storage modes."""
     # Invalid mode in preferences
-    res = await async_client.put("/api/v1/settings/preferences", json={"preferred_mode": "invalid_mode_xyz"})
+    res = await async_client.put(
+        "/api/v1/settings/preferences", json={"preferred_mode": "invalid_mode_xyz"}
+    )
     assert res.status_code == 400
     assert res.json()["error"]["code"] == "INVALID_STORAGE_MODE"
 
@@ -92,7 +96,9 @@ async def test_whole_object_encryption_decryption_and_integrity(test_env):
 
     # Verify chunks table has exactly 1 chunk (no parity chunks)
     cursor = conn.cursor()
-    cursor.execute("SELECT is_parity, stripe_index, position FROM chunks WHERE file_id = ?", (uploaded["id"],))
+    cursor.execute(
+        "SELECT is_parity, stripe_index, position FROM chunks WHERE file_id = ?", (uploaded["id"],)
+    )
     chunks = cursor.fetchall()
     assert len(chunks) == 1
     assert chunks[0]["is_parity"] == 0

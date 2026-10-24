@@ -63,6 +63,7 @@ def test_wrong_password_and_tampered_ciphertext(test_env):
     # 2. Tampered ciphertext detected
     valid_payload = b"Hello Frankenstein Storage Vault!"
     from backend.app.crypto.cipher import encrypt_chunk
+
     enc_chunk = bytearray(encrypt_chunk(valid_payload, key))
 
     # Flip one byte in the ciphertext portion (after 12-byte nonce)
@@ -140,9 +141,21 @@ async def test_disk_corruption_and_parity_rebuild(test_env):
 
     # Find first chunk on disk
     cursor = conn.cursor()
-    cursor.execute("SELECT c.chunk_id, d.path FROM chunks c JOIN drives d ON c.drive_id = d.id WHERE c.file_id = ? LIMIT 1", (file_id,))
+    cursor.execute(
+        "SELECT c.chunk_id, d.path FROM chunks c JOIN drives d ON c.drive_id = d.id WHERE c.file_id = ? LIMIT 1",
+        (file_id,),
+    )
     row = cursor.fetchone()
-    chunk_file = (test_env["tmp_path"] / "drives" / Path(row["path"]).name / ".frankenstein" / "chunks" / row["chunk_id"][:2] / row["chunk_id"][2:4] / row["chunk_id"])
+    chunk_file = (
+        test_env["tmp_path"]
+        / "drives"
+        / Path(row["path"]).name
+        / ".frankenstein"
+        / "chunks"
+        / row["chunk_id"][:2]
+        / row["chunk_id"][2:4]
+        / row["chunk_id"]
+    )
 
     assert chunk_file.exists()
     content = bytearray(chunk_file.read_bytes())
@@ -207,6 +220,7 @@ async def test_restart_new_app_instance(test_env):
 
     # Simulate new app instance opening the same SQLite file
     from backend.app.db.connection import create_connection
+
     new_conn = create_connection(test_env["db_file"])
     try:
         # Unlock vault with password

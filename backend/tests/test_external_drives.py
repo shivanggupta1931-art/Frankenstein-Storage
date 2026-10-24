@@ -2,7 +2,6 @@
 
 import io
 import os
-import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -32,6 +31,7 @@ def test_detect_external_usb_volumes(tmp_path: Path):
     pendrive_2.mkdir()
 
     orig_stat = os.stat
+
     def fake_stat(p, *args, **kwargs):
         stat_res = orig_stat(p, *args, **kwargs)
         # Give pendrive directories a different device ID than root
@@ -41,7 +41,10 @@ def test_detect_external_usb_volumes(tmp_path: Path):
             return mock_st
         return stat_res
 
-    with patch("backend.app.services.drive_service.Path", side_effect=lambda p: mock_volumes if str(p) == "/Volumes" else Path(p)):
+    with patch(
+        "backend.app.services.drive_service.Path",
+        side_effect=lambda p: mock_volumes if str(p) == "/Volumes" else Path(p),
+    ):
         with patch("backend.app.services.drive_service.os.stat", side_effect=fake_stat):
             drives = drive_service.get_external_usb_drives()
             names = [d["name"] for d in drives]
@@ -110,15 +113,17 @@ async def test_hybrid_pool_with_external_usb_and_parity_rebuild(test_env, tmp_pa
 
     # 1. Add Local Drive 1
     d1_path = tmp_path / "LocalDrive1"
-    d1 = drive_service.add_drive(conn, str(d1_path), "Internal SSD Part 1", provider_type="local")
+    drive_service.add_drive(conn, str(d1_path), "Internal SSD Part 1", provider_type="local")
 
     # 2. Add Local Drive 2
     d2_path = tmp_path / "LocalDrive2"
-    d2 = drive_service.add_drive(conn, str(d2_path), "Internal SSD Part 2", provider_type="local")
+    drive_service.add_drive(conn, str(d2_path), "Internal SSD Part 2", provider_type="local")
 
     # 3. Add External USB Pendrive
     usb_path = tmp_path / "USB_Pendrive"
-    d_usb = drive_service.add_drive(conn, str(usb_path), "USB Flash Drive (SanDisk)", provider_type="local")
+    d_usb = drive_service.add_drive(
+        conn, str(usb_path), "USB Flash Drive (SanDisk)", provider_type="local"
+    )
 
     # Ensure drives are online
     drives = drive_service.list_drives(conn)
@@ -137,7 +142,9 @@ async def test_hybrid_pool_with_external_usb_and_parity_rebuild(test_env, tmp_pa
 
     # Verify chunks are placed across drives, including the USB drive
     cursor = conn.cursor()
-    cursor.execute("SELECT drive_id, chunk_id, is_parity FROM chunks WHERE file_id = ?", (upload_res["id"],))
+    cursor.execute(
+        "SELECT drive_id, chunk_id, is_parity FROM chunks WHERE file_id = ?", (upload_res["id"],)
+    )
     chunks = cursor.fetchall()
     assert len(chunks) == 6  # 3 chunks per stripe * 2 stripes (4 data chunks + 2 parity chunks)
     drive_ids_used = {c["drive_id"] for c in chunks}
@@ -170,7 +177,9 @@ def test_external_drive_flat_chunk_structure_and_manifest(tmp_path: Path):
     # 1. Verify chunk is stored flat directly in chunks/<chunk_id>, NOT in chunks/a1/b2/
     expected_flat_chunk = usb_root / "frankenstein_storage" / "chunks" / chunk_id
     assert expected_flat_chunk.exists(), "Chunk is stored directly in flat chunks folder"
-    assert not (usb_root / "frankenstein_storage" / "chunks" / "a1").exists(), "No nested a1 folder created"
+    assert not (usb_root / "frankenstein_storage" / "chunks" / "a1").exists(), (
+        "No nested a1 folder created"
+    )
 
     # 2. Verify chunk can be read back cleanly
     retrieved = provider.get_chunk(chunk_id)
@@ -244,7 +253,9 @@ async def test_safe_eject_external_usb_drive(test_env, tmp_path: Path):
 
     # 2. Setup external USB drive under /Volumes/
     d_usb_path = tmp_path / "Volumes" / "LexarUSB" / "FrankensteinStorage"
-    d_usb = drive_service.add_drive(conn, str(d_usb_path), "Lexar USB Flash Drive", provider_type="local")
+    d_usb = drive_service.add_drive(
+        conn, str(d_usb_path), "Lexar USB Flash Drive", provider_type="local"
+    )
     conn.commit()
 
     transport = ASGITransport(app=app)
@@ -272,7 +283,9 @@ async def test_safe_eject_external_usb_drive(test_env, tmp_path: Path):
 
     # Verify operation log entry
     cursor = conn.cursor()
-    cursor.execute("SELECT operation, details, status FROM operation_log WHERE operation = 'EJECT_DRIVE'")
+    cursor.execute(
+        "SELECT operation, details, status FROM operation_log WHERE operation = 'EJECT_DRIVE'"
+    )
     op = cursor.fetchone()
     assert op is not None
     assert op["status"] == "SUCCESS"
@@ -289,8 +302,8 @@ async def test_safe_eject_parity_recovery_fault_tolerance(test_env, tmp_path: Pa
     conn.commit()
 
     # 1. Add 2 internal SSD drives
-    d1 = drive_service.add_drive(conn, str(tmp_path / "SSD1"), "SSD 1", provider_type="local")
-    d2 = drive_service.add_drive(conn, str(tmp_path / "SSD2"), "SSD 2", provider_type="local")
+    drive_service.add_drive(conn, str(tmp_path / "SSD1"), "SSD 1", provider_type="local")
+    drive_service.add_drive(conn, str(tmp_path / "SSD2"), "SSD 2", provider_type="local")
 
     # 2. Add 1 external USB pendrive
     usb_path = tmp_path / "Volumes" / "SamsungBar" / "FrankensteinStorage"
@@ -308,7 +321,10 @@ async def test_safe_eject_parity_recovery_fault_tolerance(test_env, tmp_path: Pa
 
     # Verify chunks exist on the USB drive
     cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) AS count FROM chunks WHERE file_id = ? AND drive_id = ?", (uploaded["id"], d_usb["id"]))
+    cursor.execute(
+        "SELECT COUNT(*) AS count FROM chunks WHERE file_id = ? AND drive_id = ?",
+        (uploaded["id"], d_usb["id"]),
+    )
     assert cursor.fetchone()["count"] > 0
 
     # Safely eject the USB pendrive

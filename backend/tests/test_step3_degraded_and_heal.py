@@ -19,6 +19,7 @@ import io
 import os
 import shutil
 import tempfile
+
 import pytest
 
 from backend.app.core.config import settings
@@ -27,13 +28,13 @@ from backend.app.crypto.key_manager import key_manager
 from backend.app.db.connection import create_connection
 from backend.app.db.migrations import run_migrations
 from backend.app.providers.local import LocalFolderProvider
-from backend.app.services.drive_service import add_drive, patch_drive, list_drives
+from backend.app.services.drive_service import add_drive, patch_drive
 from backend.app.services.storage_engine import (
-    upload_stream,
     download_stream,
     get_file_chunks_map,
-    verify_integrity,
     heal_pool,
+    upload_stream,
+    verify_integrity,
 )
 
 
@@ -182,8 +183,6 @@ async def test_30mb_parity_file_survives_each_drive_offline_and_heals(step3_real
 @pytest.mark.asyncio
 async def test_mirrored_file_survives_one_offline_and_fails_on_two(step3_real_env):
     conn = step3_real_env["conn"]
-    drives = step3_real_env["drives"]
-    d1, d2, d3 = drives[0], drives[1], drives[2]
 
     # Explicit mirrored file (2 MiB)
     mirror_data = os.urandom(2 * 1024 * 1024)
@@ -234,7 +233,6 @@ async def test_mirrored_file_survives_one_offline_and_fails_on_two(step3_real_en
 @pytest.mark.asyncio
 async def test_tiny_file_mirroring_and_offline_behavior(step3_real_env):
     conn = step3_real_env["conn"]
-    drives = step3_real_env["drives"]
 
     # Tiny file < 1 MiB (e.g. 128 KiB)
     tiny_data = os.urandom(128 * 1024)

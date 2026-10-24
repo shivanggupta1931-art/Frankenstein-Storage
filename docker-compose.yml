@@ -1,0 +1,37 @@
+services:
+  frankenstein:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghcr.io/shivanggupta1931/frankenstein-storage:latest
+    container_name: frankenstein-storage
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8765
+      - AUTH_TOKEN=${AUTH_TOKEN:-frankenstein-demo-token}
+      - ALLOW_ALL_HOSTS=true
+      - ALLOW_ALL_ORIGINS=true
+      - DATABASE_PATH=/data/frankenstein.db
+      - MIN_DRIVES=3
+    volumes:
+      # Persistent SQLite database and vault keys
+      - frankenstein_data:/data
+      # Host storage folder mounted into container pool
+      - ./storage_pool:/mnt/storage
+      # Uncomment on Linux to expose external drives:
+      # - /media:/media:rw
+      # Uncomment on macOS (Docker Desktop) to expose external volumes:
+      # - /Volumes:/Volumes:rw
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8765/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  frankenstein_data:
+    driver: local

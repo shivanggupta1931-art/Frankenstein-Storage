@@ -12,7 +12,7 @@ def get_available_migrations(migrations_dir: Path | None = None) -> list[tuple[i
     target_dir = migrations_dir or MIGRATIONS_DIR
     if not target_dir.exists():
         return []
-    
+
     migrations: list[tuple[int, Path]] = []
     pattern = re.compile(r"^(\d+)_.*\.sql$")
     for file in sorted(target_dir.glob("*.sql")):
@@ -20,7 +20,7 @@ def get_available_migrations(migrations_dir: Path | None = None) -> list[tuple[i
         if match:
             version = int(match.group(1))
             migrations.append((version, file))
-    
+
     return sorted(migrations, key=lambda x: x[0])
 
 
@@ -34,10 +34,10 @@ def run_migrations(db_path: Path | None = None, migrations_dir: Path | None = No
                 applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
+
         cursor = conn.execute("SELECT version FROM schema_version")
         applied_versions = {row["version"] for row in cursor.fetchall()}
-        
+
         available = get_available_migrations(migrations_dir)
         for version, path in available:
             if version not in applied_versions:
@@ -48,5 +48,5 @@ def run_migrations(db_path: Path | None = None, migrations_dir: Path | None = No
                     (version,),
                 )
                 applied_count += 1
-                
+
     return applied_count

@@ -20,24 +20,55 @@ class Settings:
 
         self.host: str = os.getenv("HOST", "127.0.0.1")
         self.port: int = int(os.getenv("PORT", "8765"))
-        
+
         db_path_env = os.getenv("DATABASE_PATH", "frankenstein.db")
         self.database_path: Path = Path(db_path_env).resolve()
-        
+
         self.chunk_size_bytes: int = int(os.getenv("CHUNK_SIZE_BYTES", str(1024 * 1024)))
         self.min_drives: int = int(os.getenv("MIN_DRIVES", "3"))
-        self.smart_upload_threshold_bytes: int = int(os.getenv("SMART_UPLOAD_THRESHOLD_BYTES", str(1024 * 1024)))
-        
+        self.smart_upload_threshold_bytes: int = int(
+            os.getenv("SMART_UPLOAD_THRESHOLD_BYTES", str(1024 * 1024))
+        )
+
         # Drive safety reserve constraints (default: keep at least 2 GiB or 5% free, whichever is larger)
-        self.min_reserve_bytes: int = int(os.getenv("MIN_RESERVE_BYTES", str(2 * 1024 * 1024 * 1024)))
+        self.min_reserve_bytes: int = int(
+            os.getenv("MIN_RESERVE_BYTES", str(2 * 1024 * 1024 * 1024))
+        )
         self.min_reserve_ratio: float = float(os.getenv("MIN_RESERVE_RATIO", "0.05"))
 
+        # Static assets directory
+        repo_root = Path(__file__).resolve().parent.parent.parent.parent
+        static_dir_env = os.getenv("STATIC_DIR")
+        if static_dir_env:
+            self.static_dir: Path = Path(static_dir_env).resolve()
+        else:
+            self.static_dir: Path = (repo_root / "frontend" / "dist").resolve()
+
         # Security constraints
+        self.allow_all_hosts: bool = os.getenv("ALLOW_ALL_HOSTS", "").lower() in {
+            "true",
+            "1",
+            "yes",
+        }
+        self.allow_all_origins: bool = os.getenv("ALLOW_ALL_ORIGINS", "").lower() in {
+            "true",
+            "1",
+            "yes",
+        }
+
+        extra_hosts = {
+            h.strip().lower() for h in os.getenv("ALLOWED_HOSTS", "").split(",") if h.strip()
+        }
         self.allowed_hosts = {
             "127.0.0.1",
             "localhost",
+            "testserver",
             f"127.0.0.1:{self.port}",
             f"localhost:{self.port}",
+        } | extra_hosts
+
+        extra_origins = {
+            o.strip().rstrip("/") for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()
         }
         self.allowed_origins = {
             os.getenv("VITE_DEV_ORIGIN", "http://127.0.0.1:5173"),
@@ -48,8 +79,9 @@ class Settings:
             "http://localhost:5175",
             f"http://127.0.0.1:{self.port}",
             f"http://localhost:{self.port}",
-        }
-        
+            "http://testserver",
+        } | extra_origins
+
         # Session token
         token_env = os.getenv("AUTH_TOKEN")
         if token_env and token_env.strip():

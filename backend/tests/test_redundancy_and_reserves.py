@@ -3,26 +3,23 @@
 import hashlib
 import io
 import os
-from pathlib import Path
+
 import pytest
 
-from backend.app.core.config import settings, calculate_reserve
+from backend.app.core.config import calculate_reserve, settings
 from backend.app.core.errors import AppError
 from backend.app.services.drive_service import (
     calculate_pooled_overview,
     list_drives,
     patch_drive,
-    add_drive,
 )
 from backend.app.services.storage_engine import (
     download_stream,
     get_available_drives_for_storage,
     get_file_chunks_map,
-    pick_placement_drives,
     reprotect_all_files,
     reprotect_file,
     upload_stream,
-    verify_integrity,
 )
 
 
@@ -42,7 +39,9 @@ async def test_reserve_calculation_and_low_space_exclusion(test_env):
 
     # Test reserve function calculation rules
     # 2 GiB or 5%, capped at 50% for tiny drives
-    assert calculate_reserve(100 * 1024**3) == max(settings.min_reserve_bytes, int(100 * 1024**3 * settings.min_reserve_ratio))
+    assert calculate_reserve(100 * 1024**3) == max(
+        settings.min_reserve_bytes, int(100 * 1024**3 * settings.min_reserve_ratio)
+    )
     assert calculate_reserve(0) == 0
 
     # Simulate extreme reserve requirement that exceeds available free space
@@ -88,6 +87,7 @@ async def test_small_file_mirrored_across_two_drives(test_env):
     )
 
     assert uploaded["status"] == "complete"
+    assert uploaded["sha256"] == expected_hash
     assert uploaded["storage_mode"] == "mirrored"
     assert uploaded["protection_status"] == "mirrored"
     assert uploaded["unprotected_reason"] is None
@@ -167,7 +167,6 @@ async def test_two_drives_pool_always_mirrors(test_env):
 async def test_reprotect_and_reprotect_all_action(test_env):
     """Test 4: Unprotected file can be re-protected without corrupting data."""
     conn = test_env["conn"]
-    drives = test_env["drives"]
 
     # Upload a file in explicit whole (unprotected) mode
     data = b"Unprotected single drive file that needs re-protection! " * 50

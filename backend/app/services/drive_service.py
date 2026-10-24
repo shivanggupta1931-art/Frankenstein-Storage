@@ -23,7 +23,9 @@ def get_drive_provider(drive_row: sqlite3.Row | dict[str, Any]) -> StorageProvid
 
     if provider_type == "gdrive" or path_val.startswith("gdrive://"):
         raw_config = row_dict.get("config")
-        config = raw_config if isinstance(raw_config, (dict, type(None))) else json.loads(raw_config)
+        config = (
+            raw_config if isinstance(raw_config, (dict, type(None))) else json.loads(raw_config)
+        )
         return GoogleDriveProvider(
             config=config,
             simulated_offline=bool(row_dict.get("simulated_offline", 0)),
@@ -31,7 +33,11 @@ def get_drive_provider(drive_row: sqlite3.Row | dict[str, Any]) -> StorageProvid
 
     if provider_type in ("s3", "r2", "minio", "b2") or path_val.startswith("s3://"):
         raw_config = row_dict.get("config")
-        config = raw_config if isinstance(raw_config, (dict, type(None))) else (json.loads(raw_config) if raw_config else {})
+        config = (
+            raw_config
+            if isinstance(raw_config, (dict, type(None)))
+            else (json.loads(raw_config) if raw_config else {})
+        )
         return S3StorageProvider(
             config=config,
             simulated_offline=bool(row_dict.get("simulated_offline", 0)),
@@ -67,7 +73,9 @@ def list_drives(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         # Determine status string and placement eligibility
         if row["status"] == "ejected":
             effective_status = "ejected"
-            exclusion_reason = "Pendrive ejected. Re-insert USB drive to reconnect to the storage pool."
+            exclusion_reason = (
+                "Pendrive ejected. Re-insert USB drive to reconnect to the storage pool."
+            )
             is_eligible = False
         elif row["simulated_offline"]:
             effective_status = "simulated_offline"
@@ -76,12 +84,16 @@ def list_drives(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         elif not avail:
             effective_status = "unavailable"
             is_usb = bool(dev_info.get("is_external") or usage.get("is_external"))
-            exclusion_reason = "Pendrive disconnected or path unreachable" if is_usb else "Offline (Storage path unreachable)"
+            exclusion_reason = (
+                "Pendrive disconnected or path unreachable"
+                if is_usb
+                else "Offline (Storage path unreachable)"
+            )
             is_eligible = False
         elif is_low_space:
             effective_status = "low_space"
-            res_gib = round(reserve_bytes / (1024 ** 3), 1)
-            free_gib = round(free_bytes / (1024 ** 3), 2)
+            res_gib = round(reserve_bytes / (1024**3), 1)
+            free_gib = round(free_bytes / (1024**3), 2)
             exclusion_reason = f"Low space: {free_gib} GiB free is below {res_gib} GiB reserve"
             is_eligible = False
         else:
@@ -91,7 +103,10 @@ def list_drives(conn: sqlite3.Connection) -> list[dict[str, Any]]:
 
         # Count active chunks on this drive
         chunk_cursor = conn.cursor()
-        chunk_cursor.execute("SELECT COUNT(*) AS count, COALESCE(SUM(size), 0) AS total_size FROM chunks WHERE drive_id = ?", (row["id"],))
+        chunk_cursor.execute(
+            "SELECT COUNT(*) AS count, COALESCE(SUM(size), 0) AS total_size FROM chunks WHERE drive_id = ?",
+            (row["id"],),
+        )
         chunk_stat = chunk_cursor.fetchone()
 
         # Check for Google Drive folder URL in config
@@ -105,30 +120,32 @@ def list_drives(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             except Exception:
                 pass
 
-        results.append({
-            "id": row["id"],
-            "display_name": row["display_name"],
-            "path": display_path,
-            "provider_type": row["provider_type"] if "provider_type" in row.keys() else "local",
-            "status": effective_status,
-            "simulated_offline": bool(row["simulated_offline"]),
-            "available": avail,
-            "usage": usage,
-            "reserve_bytes": reserve_bytes,
-            "effective_free": effective_free,
-            "is_low_space": is_low_space,
-            "is_placement_eligible": is_eligible,
-            "exclusion_reason": exclusion_reason,
-            "chunk_count": chunk_stat["count"],
-            "chunks_total_bytes": chunk_stat["total_size"],
-            "device_id": dev_info.get("device_id"),
-            "st_dev": dev_info.get("st_dev"),
-            "mount_point": dev_info.get("mount_point"),
-            "volume_name": dev_info.get("volume_name"),
-            "is_external": bool(dev_info.get("is_external") or usage.get("is_external")),
-            "is_removable": bool(dev_info.get("is_removable") or usage.get("is_removable")),
-            "created_at": row["created_at"],
-        })
+        results.append(
+            {
+                "id": row["id"],
+                "display_name": row["display_name"],
+                "path": display_path,
+                "provider_type": row["provider_type"] if "provider_type" in row.keys() else "local",
+                "status": effective_status,
+                "simulated_offline": bool(row["simulated_offline"]),
+                "available": avail,
+                "usage": usage,
+                "reserve_bytes": reserve_bytes,
+                "effective_free": effective_free,
+                "is_low_space": is_low_space,
+                "is_placement_eligible": is_eligible,
+                "exclusion_reason": exclusion_reason,
+                "chunk_count": chunk_stat["count"],
+                "chunks_total_bytes": chunk_stat["total_size"],
+                "device_id": dev_info.get("device_id"),
+                "st_dev": dev_info.get("st_dev"),
+                "mount_point": dev_info.get("mount_point"),
+                "volume_name": dev_info.get("volume_name"),
+                "is_external": bool(dev_info.get("is_external") or usage.get("is_external")),
+                "is_removable": bool(dev_info.get("is_removable") or usage.get("is_removable")),
+                "created_at": row["created_at"],
+            }
+        )
 
     # Annotate shared physical devices
     device_counts: dict[str, int] = {}
@@ -194,17 +211,19 @@ def get_external_usb_drives() -> list[dict[str, Any]]:
                 except Exception:
                     pass
 
-                external_drives.append({
-                    "name": f"USB Drive: {vol.name}",
-                    "path": str(target_folder),
-                    "total": vol_usage.total,
-                    "free": vol_usage.free,
-                    "used": vol_usage.used,
-                    "is_external": True,
-                    "is_removable": True,
-                    "volume_name": vol.name,
-                    "description": f"Physical external USB / removable drive at /Volumes/{vol.name}",
-                })
+                external_drives.append(
+                    {
+                        "name": f"USB Drive: {vol.name}",
+                        "path": str(target_folder),
+                        "total": vol_usage.total,
+                        "free": vol_usage.free,
+                        "used": vol_usage.used,
+                        "is_external": True,
+                        "is_removable": True,
+                        "volume_name": vol.name,
+                        "description": f"Physical external USB / removable drive at /Volumes/{vol.name}",
+                    }
+                )
             except Exception:
                 continue
     except (PermissionError, OSError):
@@ -213,7 +232,9 @@ def get_external_usb_drives() -> list[dict[str, Any]]:
     return external_drives
 
 
-def calculate_pooled_overview(conn: sqlite3.Connection, drives: list[dict[str, Any]]) -> dict[str, Any]:
+def calculate_pooled_overview(
+    conn: sqlite3.Connection, drives: list[dict[str, Any]]
+) -> dict[str, Any]:
     """Calculates storage overview with honest figures: Raw capacity, Usable capacity, and Free usable space."""
     device_capacities: dict[str, int] = {}
     device_free: dict[str, int] = {}
@@ -246,7 +267,9 @@ def calculate_pooled_overview(conn: sqlite3.Connection, drives: list[dict[str, A
                 eligible_device_capacities[dev_id] = total
                 eligible_device_effective_free[dev_id] = effective_free
             else:
-                eligible_device_effective_free[dev_id] = min(eligible_device_effective_free[dev_id], effective_free)
+                eligible_device_effective_free[dev_id] = min(
+                    eligible_device_effective_free[dev_id], effective_free
+                )
                 eligible_device_capacities[dev_id] = max(eligible_device_capacities[dev_id], total)
 
     raw_capacity = sum(device_capacities.values())
@@ -283,9 +306,13 @@ def calculate_pooled_overview(conn: sqlite3.Connection, drives: list[dict[str, A
     vault_chunks_bytes = cursor.fetchone()["total_chunks_bytes"]
 
     # Pooled used represents vault chunks stored
-    pooled_used = min(vault_chunks_bytes, usable_capacity) if usable_capacity > 0 else vault_chunks_bytes
+    pooled_used = (
+        min(vault_chunks_bytes, usable_capacity) if usable_capacity > 0 else vault_chunks_bytes
+    )
 
-    cursor.execute("SELECT COUNT(*) AS count, COALESCE(SUM(size), 0) AS total_size FROM files WHERE status = 'complete'")
+    cursor.execute(
+        "SELECT COUNT(*) AS count, COALESCE(SUM(size), 0) AS total_size FROM files WHERE status = 'complete'"
+    )
     file_stat = cursor.fetchone()
 
     return {
@@ -294,12 +321,10 @@ def calculate_pooled_overview(conn: sqlite3.Connection, drives: list[dict[str, A
         "raw_free": raw_free,
         "usable_capacity": usable_capacity,
         "free_usable_space": free_usable_space,
-
         # Calculation Tooltip Explanations
         "raw_capacity_description": "Total physical storage across all registered drives (de-duplicated across shared Mac/APFS volumes).",
         "usable_capacity_description": f"Actual usable capacity available for encrypted files after {redundancy_label} overhead and reserves.",
         "free_usable_space_description": f"Real free space available for new file uploads after 2 GiB / 5% reserves and {round((1.0 - efficiency) * 100)}% redundancy overhead.",
-
         # Redundancy & Drive Counts
         "redundancy_mode": redundancy_mode,
         "redundancy_label": redundancy_label,
@@ -308,7 +333,6 @@ def calculate_pooled_overview(conn: sqlite3.Connection, drives: list[dict[str, A
         "drives_online": online_count,
         "drives_eligible": eligible_count,
         "drives_ratio": f"{online_count} of {len(drives)}",
-
         # Backward compatibility for existing UI components and tests
         "pooled_capacity": raw_capacity,
         "pooled_used": pooled_used,
@@ -332,15 +356,17 @@ def get_macos_storage_locations() -> list[dict[str, Any]]:
     doc_pool = home / "Documents" / "FrankensteinStorage"
     try:
         usage = shutil.disk_usage(home)
-        locations.append({
-            "name": "Macintosh HD (Documents Pool)",
-            "path": str(doc_pool),
-            "total": usage.total,
-            "free": usage.free,
-            "used": usage.used,
-            "is_external": False,
-            "description": "Primary internal macOS SSD storage under ~/Documents",
-        })
+        locations.append(
+            {
+                "name": "Macintosh HD (Documents Pool)",
+                "path": str(doc_pool),
+                "total": usage.total,
+                "free": usage.free,
+                "used": usage.used,
+                "is_external": False,
+                "description": "Primary internal macOS SSD storage under ~/Documents",
+            }
+        )
     except Exception:
         pass
 
@@ -348,15 +374,17 @@ def get_macos_storage_locations() -> list[dict[str, Any]]:
     dl_pool = home / "Downloads" / "FrankensteinStorage"
     try:
         usage = shutil.disk_usage(home)
-        locations.append({
-            "name": "Macintosh HD (Downloads Pool)",
-            "path": str(dl_pool),
-            "total": usage.total,
-            "free": usage.free,
-            "used": usage.used,
-            "is_external": False,
-            "description": "Secondary internal macOS storage under ~/Downloads",
-        })
+        locations.append(
+            {
+                "name": "Macintosh HD (Downloads Pool)",
+                "path": str(dl_pool),
+                "total": usage.total,
+                "free": usage.free,
+                "used": usage.used,
+                "is_external": False,
+                "description": "Secondary internal macOS storage under ~/Downloads",
+            }
+        )
     except Exception:
         pass
 
@@ -364,15 +392,17 @@ def get_macos_storage_locations() -> list[dict[str, Any]]:
     dot_pool = home / "FrankensteinDrives" / "primary_ssd"
     try:
         usage = shutil.disk_usage(home)
-        locations.append({
-            "name": "Macintosh HD (Fast Storage)",
-            "path": str(dot_pool),
-            "total": usage.total,
-            "free": usage.free,
-            "used": usage.used,
-            "is_external": False,
-            "description": "Dedicated macOS vault folder in ~/FrankensteinDrives",
-        })
+        locations.append(
+            {
+                "name": "Macintosh HD (Fast Storage)",
+                "path": str(dot_pool),
+                "total": usage.total,
+                "free": usage.free,
+                "used": usage.used,
+                "is_external": False,
+                "description": "Dedicated macOS vault folder in ~/FrankensteinDrives",
+            }
+        )
     except Exception:
         pass
 
@@ -386,25 +416,33 @@ def get_macos_storage_locations() -> list[dict[str, Any]]:
             for vol in volumes_dir.iterdir():
                 if vol.name.startswith(".") or vol.is_symlink():
                     continue
-                is_gdrive_vol = "googledrive" in vol.name.lower() or "google drive" in vol.name.lower()
+                is_gdrive_vol = (
+                    "googledrive" in vol.name.lower() or "google drive" in vol.name.lower()
+                )
                 if is_gdrive_vol:
                     try:
-                        vol_usage = shutil.disk_usage(vol)
+                        shutil.disk_usage(vol)
                         my_drive_vol = vol / "My Drive"
                         target_path = my_drive_vol if my_drive_vol.exists() else vol
                         sample_folder = target_path / "sample"
-                        final_path = sample_folder if sample_folder.exists() else (target_path / "FrankensteinVault")
-                        gdrive_vol_quota = 15 * (1024 ** 3)
-                        locations.append({
-                            "name": f"Google Drive Desktop ({vol.name})",
-                            "path": str(final_path),
-                            "total": gdrive_vol_quota,
-                            "free": gdrive_vol_quota,
-                            "used": 0,
-                            "is_external": False,
-                            "is_cloud_synced": True,
-                            "description": "Auto-syncs chunks directly to Google Drive in real-time",
-                        })
+                        final_path = (
+                            sample_folder
+                            if sample_folder.exists()
+                            else (target_path / "FrankensteinVault")
+                        )
+                        gdrive_vol_quota = 15 * (1024**3)
+                        locations.append(
+                            {
+                                "name": f"Google Drive Desktop ({vol.name})",
+                                "path": str(final_path),
+                                "total": gdrive_vol_quota,
+                                "free": gdrive_vol_quota,
+                                "used": 0,
+                                "is_external": False,
+                                "is_cloud_synced": True,
+                                "description": "Auto-syncs chunks directly to Google Drive in real-time",
+                            }
+                        )
                     except Exception:
                         continue
     except (PermissionError, OSError):
@@ -414,17 +452,19 @@ def get_macos_storage_locations() -> list[dict[str, Any]]:
     icloud_base = home / "Library" / "Mobile Documents" / "com~apple~CloudDocs"
     if icloud_base.exists():
         icloud_vault = icloud_base / "FrankensteinStorage"
-        icloud_quota = 5 * (1024 ** 3)  # 5 GiB standard free tier
-        locations.append({
-            "name": "Apple iCloud Drive",
-            "path": str(icloud_vault),
-            "total": icloud_quota,
-            "free": icloud_quota,
-            "used": 0,
-            "is_external": False,
-            "is_cloud_synced": True,
-            "description": "Native macOS zero-config cloud sync via iCloud Drive (5 GiB free tier)",
-        })
+        icloud_quota = 5 * (1024**3)  # 5 GiB standard free tier
+        locations.append(
+            {
+                "name": "Apple iCloud Drive",
+                "path": str(icloud_vault),
+                "total": icloud_quota,
+                "free": icloud_quota,
+                "used": 0,
+                "is_external": False,
+                "is_cloud_synced": True,
+                "description": "Native macOS zero-config cloud sync via iCloud Drive (5 GiB free tier)",
+            }
+        )
 
     # 6. Cloud Storage providers (Google Drive, OneDrive, Dropbox in ~/Library/CloudStorage or ~)
     cloud_storage = home / "Library" / "CloudStorage"
@@ -452,25 +492,42 @@ def get_macos_storage_locations() -> list[dict[str, Any]]:
                             try:
                                 for sub in my_drive.iterdir():
                                     if sub.is_dir() and not sub.name.startswith("."):
-                                        if any(k in sub.name.lower() for k in ("sample", "frankenstein", "shukla", "vault", "storage")):
+                                        if any(
+                                            k in sub.name.lower()
+                                            for k in (
+                                                "sample",
+                                                "frankenstein",
+                                                "shukla",
+                                                "vault",
+                                                "storage",
+                                            )
+                                        ):
                                             existing_target = sub
                                             break
                             except Exception:
                                 pass
 
-                        final_dir = existing_target if existing_target else (my_drive / "FrankensteinStorage" if my_drive.exists() else item / "FrankensteinStorage")
+                        final_dir = (
+                            existing_target
+                            if existing_target
+                            else (
+                                my_drive / "FrankensteinStorage"
+                                if my_drive.exists()
+                                else item / "FrankensteinStorage"
+                            )
+                        )
                         if is_gdrive:
-                            quota = 15 * (1024 ** 3)
+                            quota = 15 * (1024**3)
                             email_hint = item.name.replace("GoogleDrive-", "")
                             disp_name = f"Google Drive ({email_hint})"
                             desc = f"Auto-syncs chunks directly to Google Drive ({email_hint}) in real-time"
                         elif is_onedrive:
-                            quota = 5 * (1024 ** 3)
+                            quota = 5 * (1024**3)
                             hint = item.name.replace("OneDrive-", "")
                             disp_name = f"Microsoft OneDrive ({hint})"
                             desc = f"Auto-syncs chunks directly to OneDrive ({hint}) in real-time"
                         elif is_dropbox:
-                            quota = 2 * (1024 ** 3)
+                            quota = 2 * (1024**3)
                             hint = item.name.replace("Dropbox-", "")
                             disp_name = f"Dropbox ({hint})"
                             desc = f"Auto-syncs chunks directly to Dropbox ({hint}) in real-time"
@@ -479,16 +536,18 @@ def get_macos_storage_locations() -> list[dict[str, Any]]:
                             disp_name = f"Cloud Storage: {item.name}"
                             desc = f"Synced cloud folder via {item.name}"
 
-                        locations.append({
-                            "name": disp_name,
-                            "path": str(final_dir),
-                            "total": quota,
-                            "free": quota,
-                            "used": 0,
-                            "is_external": False,
-                            "is_cloud_synced": True,
-                            "description": desc,
-                        })
+                        locations.append(
+                            {
+                                "name": disp_name,
+                                "path": str(final_dir),
+                                "total": quota,
+                                "free": quota,
+                                "used": 0,
+                                "is_external": False,
+                                "is_cloud_synced": True,
+                                "description": desc,
+                            }
+                        )
                     except Exception:
                         pass
         except Exception:
@@ -497,31 +556,35 @@ def get_macos_storage_locations() -> list[dict[str, Any]]:
     # Check fallback home OneDrive / Dropbox if not found in CloudStorage
     if not detected_onedrive and (home / "OneDrive").exists():
         od_path = home / "OneDrive" / "FrankensteinStorage"
-        od_quota = 5 * (1024 ** 3)
-        locations.append({
-            "name": "Microsoft OneDrive",
-            "path": str(od_path),
-            "total": od_quota,
-            "free": od_quota,
-            "used": 0,
-            "is_external": False,
-            "is_cloud_synced": True,
-            "description": "Auto-syncs chunks directly to Microsoft OneDrive in real-time",
-        })
+        od_quota = 5 * (1024**3)
+        locations.append(
+            {
+                "name": "Microsoft OneDrive",
+                "path": str(od_path),
+                "total": od_quota,
+                "free": od_quota,
+                "used": 0,
+                "is_external": False,
+                "is_cloud_synced": True,
+                "description": "Auto-syncs chunks directly to Microsoft OneDrive in real-time",
+            }
+        )
 
     if not detected_dropbox and (home / "Dropbox").exists():
         db_path = home / "Dropbox" / "FrankensteinStorage"
-        db_quota = 2 * (1024 ** 3)
-        locations.append({
-            "name": "Dropbox",
-            "path": str(db_path),
-            "total": db_quota,
-            "free": db_quota,
-            "used": 0,
-            "is_external": False,
-            "is_cloud_synced": True,
-            "description": "Auto-syncs chunks directly to Dropbox in real-time",
-        })
+        db_quota = 2 * (1024**3)
+        locations.append(
+            {
+                "name": "Dropbox",
+                "path": str(db_path),
+                "total": db_quota,
+                "free": db_quota,
+                "used": 0,
+                "is_external": False,
+                "is_cloud_synced": True,
+                "description": "Auto-syncs chunks directly to Dropbox in real-time",
+            }
+        )
 
     return locations
 
@@ -553,7 +616,7 @@ def add_drive(
 
     if provider_type == "gdrive" or is_gdrive_url:
         config_obj = config if isinstance(config, dict) else (json.loads(config) if config else {})
-        
+
         # Extract folder ID from URL (e.g. /folders/<id>)
         folder_match = re.search(r"/folders/([a-zA-Z0-9_-]+)", raw_path)
         folder_id = folder_match.group(1) if folder_match else config_obj.get("folder_id")
@@ -580,14 +643,20 @@ def add_drive(
         # Validate gdrive provider availability
         provider = GoogleDriveProvider(config=config_obj, simulated_offline=False)
         if not provider.check_availability():
-            raise AppError(400, "DRIVE_NOT_ACCESSIBLE", "Google Drive authentication failed or unreachable. Check credentials/token.")
+            raise AppError(
+                400,
+                "DRIVE_NOT_ACCESSIBLE",
+                "Google Drive authentication failed or unreachable. Check credentials/token.",
+            )
 
         config_json = json.dumps(config_obj)
 
         cursor = conn.cursor()
         cursor.execute("SELECT id FROM drives WHERE path = ?", (clean_path,))
         if cursor.fetchone():
-            raise AppError(409, "DRIVE_EXISTS", f"Drive '{clean_name}' ({clean_path}) is already registered")
+            raise AppError(
+                409, "DRIVE_EXISTS", f"Drive '{clean_name}' ({clean_path}) is already registered"
+            )
 
         conn.execute(
             """INSERT INTO drives (id, display_name, path, status, simulated_offline, provider_type, config)
@@ -614,18 +683,28 @@ def add_drive(
         config_obj = config if isinstance(config, dict) else (json.loads(config) if config else {})
         bucket = config_obj.get("bucket", "frankenstein-vault").strip()
         prefix = config_obj.get("prefix", "chunks/").strip("/")
-        
-        clean_path = raw_path if (raw_path and raw_path.startswith("s3://")) else f"s3://{bucket}/{prefix}".rstrip("/")
+
+        clean_path = (
+            raw_path
+            if (raw_path and raw_path.startswith("s3://"))
+            else f"s3://{bucket}/{prefix}".rstrip("/")
+        )
 
         provider = S3StorageProvider(config=config_obj, simulated_offline=False)
         if not provider.check_availability():
-            raise AppError(400, "DRIVE_NOT_ACCESSIBLE", f"Could not connect to {provider.provider_variant} bucket '{bucket}'. Verify credentials/endpoint.")
+            raise AppError(
+                400,
+                "DRIVE_NOT_ACCESSIBLE",
+                f"Could not connect to {provider.provider_variant} bucket '{bucket}'. Verify credentials/endpoint.",
+            )
 
         config_json = json.dumps(config_obj)
         cursor = conn.cursor()
         cursor.execute("SELECT id FROM drives WHERE path = ?", (clean_path,))
         if cursor.fetchone():
-            raise AppError(409, "DRIVE_EXISTS", f"Drive '{clean_name}' ({clean_path}) is already registered")
+            raise AppError(
+                409, "DRIVE_EXISTS", f"Drive '{clean_name}' ({clean_path}) is already registered"
+            )
 
         conn.execute(
             """INSERT INTO drives (id, display_name, path, status, simulated_offline, provider_type, config)
@@ -634,7 +713,11 @@ def add_drive(
         )
         conn.execute(
             "INSERT INTO operation_log (operation, details, status) VALUES (?, ?, ?)",
-            ("ADD_DRIVE", f"Added {provider.provider_variant} {clean_name} ({clean_path})", "SUCCESS"),
+            (
+                "ADD_DRIVE",
+                f"Added {provider.provider_variant} {clean_name} ({clean_path})",
+                "SUCCESS",
+            ),
         )
         return {
             "id": drive_id,
@@ -659,9 +742,13 @@ def add_drive(
 
     provider = LocalFolderProvider(root_path=clean_path, simulated_offline=False)
     if not provider.check_availability():
-        raise AppError(400, "DRIVE_NOT_ACCESSIBLE", f"Directory '{clean_path}' cannot be created or accessed")
+        raise AppError(
+            400, "DRIVE_NOT_ACCESSIBLE", f"Directory '{clean_path}' cannot be created or accessed"
+        )
 
-    effective_provider_type = provider_type if provider_type in ("icloud", "onedrive", "dropbox") else "local"
+    effective_provider_type = (
+        provider_type if provider_type in ("icloud", "onedrive", "dropbox") else "local"
+    )
 
     conn.execute(
         """INSERT INTO drives (id, display_name, path, status, simulated_offline, provider_type, config)
@@ -671,7 +758,11 @@ def add_drive(
 
     conn.execute(
         "INSERT INTO operation_log (operation, details, status) VALUES (?, ?, ?)",
-        ("ADD_DRIVE", f"Added drive {clean_name} at {clean_path} ({effective_provider_type})", "SUCCESS"),
+        (
+            "ADD_DRIVE",
+            f"Added drive {clean_name} at {clean_path} ({effective_provider_type})",
+            "SUCCESS",
+        ),
     )
 
     return {
@@ -694,16 +785,21 @@ def patch_drive(
     config: dict[str, Any] | str | None = None,
 ) -> dict[str, Any]:
     cursor = conn.cursor()
-    cursor.execute("SELECT id, display_name, path, status, simulated_offline, provider_type, config FROM drives WHERE id = ?", (drive_id,))
+    cursor.execute(
+        "SELECT id, display_name, path, status, simulated_offline, provider_type, config FROM drives WHERE id = ?",
+        (drive_id,),
+    )
     row = cursor.fetchone()
     if not row:
         raise AppError(404, "DRIVE_NOT_FOUND", f"Drive with id '{drive_id}' not found")
 
-    new_sim = row["simulated_offline"] if simulated_offline is None else (1 if simulated_offline else 0)
+    new_sim = (
+        row["simulated_offline"] if simulated_offline is None else (1 if simulated_offline else 0)
+    )
     new_name = row["display_name"] if display_name is None else display_name.strip()
     new_path = row["path"] if path is None else path.strip()
     new_provider = row["provider_type"] if provider_type is None else provider_type.strip()
-    
+
     if config is not None:
         new_config = json.dumps(config) if isinstance(config, dict) else config
     else:
@@ -724,7 +820,11 @@ def patch_drive(
     status_desc = new_status
     conn.execute(
         "INSERT INTO operation_log (operation, details, status) VALUES (?, ?, ?)",
-        ("PATCH_DRIVE", f"Updated drive {drive_id} (name='{new_name}', path='{new_path}', simulated_offline={bool(new_sim)})", "SUCCESS"),
+        (
+            "PATCH_DRIVE",
+            f"Updated drive {drive_id} (name='{new_name}', path='{new_path}', simulated_offline={bool(new_sim)})",
+            "SUCCESS",
+        ),
     )
 
     return {
@@ -777,7 +877,7 @@ def eject_drive(conn: sqlite3.Connection, drive_id: str) -> dict[str, Any]:
     vol_name = path_obj.name
     if "/Volumes/" in path_str:
         idx = path_str.index("/Volumes/")
-        rel = path_str[idx + len("/Volumes/"):].strip("/")
+        rel = path_str[idx + len("/Volumes/") :].strip("/")
         vol_name = rel.split("/")[0] if rel else path_obj.name
         mount_point = Path("/Volumes") / vol_name
     elif dev_info.get("volume_name"):

@@ -59,8 +59,12 @@ class KeyManager:
             )
             verifier = hmac.new(derived_key, VERIFIER_PAYLOAD, hashlib.sha256).hexdigest()
 
-            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('salt', ?)", (salt.hex(),))
-            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('verifier', ?)", (verifier,))
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('salt', ?)", (salt.hex(),)
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('verifier', ?)", (verifier,)
+            )
             self._master_key = derived_key
             return True
         else:
@@ -74,7 +78,9 @@ class KeyManager:
                 p=SCRYPT_P,
                 dklen=KEY_LEN,
             )
-            expected_verifier = hmac.new(candidate_key, VERIFIER_PAYLOAD, hashlib.sha256).hexdigest()
+            expected_verifier = hmac.new(
+                candidate_key, VERIFIER_PAYLOAD, hashlib.sha256
+            ).hexdigest()
 
             if not hmac.compare_digest(expected_verifier, verifier_hex):
                 raise AppError(401, "INVALID_PASSWORD", "Incorrect password")

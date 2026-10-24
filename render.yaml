@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: frankenstein-storage
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    region: oregon
+    numInstances: 1
+    disk:
+      name: frankenstein-storage-disk
+      mountPath: /data
+      sizeGB: 10
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: PORT
+        value: 8765
+      - key: HOST
+        value: 0.0.0.0
+      - key: ALLOW_ALL_HOSTS
+        value: "true"
+      - key: ALLOW_ALL_ORIGINS
+        value: "true"
+      - key: DATABASE_PATH
+        value: /data/frankenstein.db
+      - key: STATIC_DIR
+        value: /app/frontend/dist
+      - key: AUTH_TOKEN
+        generateValue: true

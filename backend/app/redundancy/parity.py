@@ -1,7 +1,6 @@
 """XOR Parity calculation and rotating stripe layout."""
 
 
-
 def xor_bytes(a: bytes, b: bytes) -> bytes:
     """Computes byte-wise XOR of two equal-length byte strings."""
     if len(a) != len(b):
@@ -20,7 +19,7 @@ def compute_xor_parity(chunk_a: bytes, chunk_b: bytes) -> bytes:
 
 def rebuild_missing_chunk(available_chunk: bytes, parity_chunk: bytes) -> bytes:
     """Rebuilds missing chunk from the remaining data chunk and parity chunk.
-    
+
     Since P = A ^ B, A = B ^ P and B = A ^ P.
     """
     return xor_bytes(available_chunk, parity_chunk)
@@ -28,7 +27,7 @@ def rebuild_missing_chunk(available_chunk: bytes, parity_chunk: bytes) -> bytes:
 
 def get_stripe_layout(stripe_index: int) -> dict[str, int]:
     """Returns rotating slot assignments for a 3-chunk stripe (2 data, 1 parity).
-    
+
     Returns a dictionary mapping:
         'parity': slot_index (0, 1, or 2)
         'data0': slot_index

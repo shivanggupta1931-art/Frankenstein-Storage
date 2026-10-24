@@ -2,24 +2,21 @@ import hashlib
 import io
 import os
 from pathlib import Path
+
 import pytest
 
-from backend.app.core.config import settings
-from backend.app.core.errors import AppError
-from backend.app.crypto.key_manager import key_manager
 from backend.app.providers.local import LocalFolderProvider
 from backend.app.providers.s3 import S3StorageProvider, sign_s3_v4
 from backend.app.services.drive_service import (
     add_drive,
-    patch_drive,
-    list_drives,
     get_macos_storage_locations,
+    patch_drive,
 )
 from backend.app.services.storage_engine import (
     download_stream,
+    heal_pool,
     upload_stream,
     verify_integrity,
-    heal_pool,
 )
 
 
@@ -71,7 +68,7 @@ def test_s3_storage_provider_mock_crud(tmp_path, monkeypatch):
     assert retrieved == chunk_data
 
     usage = provider.get_usage()
-    assert usage["total"] == 10 * (1024 ** 3)
+    assert usage["total"] == 10 * (1024**3)
     assert usage["used"] == len(chunk_data)
     assert usage["is_cloud_synced"] is True
     assert "Cloudflare R2" in usage["source"]
@@ -96,7 +93,7 @@ def test_icloud_onedrive_dropbox_detection_and_quota(tmp_path):
     assert "Apple iCloud Drive" in info_icloud["volume_name"]
 
     usage_icloud = provider_icloud.get_usage()
-    assert usage_icloud["total"] == 5 * (1024 ** 3)  # 5 GiB iCloud quota
+    assert usage_icloud["total"] == 5 * (1024**3)  # 5 GiB iCloud quota
     assert "Apple iCloud Drive (5 GiB)" in usage_icloud["source"]
 
     # 2. Test Microsoft OneDrive folder
@@ -110,7 +107,7 @@ def test_icloud_onedrive_dropbox_detection_and_quota(tmp_path):
     assert "Microsoft OneDrive" in info_od["volume_name"]
 
     usage_od = provider_onedrive.get_usage()
-    assert usage_od["total"] == 5 * (1024 ** 3)  # 5 GiB OneDrive quota
+    assert usage_od["total"] == 5 * (1024**3)  # 5 GiB OneDrive quota
     assert "Microsoft OneDrive (5 GiB)" in usage_od["source"]
 
     # 3. Test Dropbox folder
@@ -124,7 +121,7 @@ def test_icloud_onedrive_dropbox_detection_and_quota(tmp_path):
     assert "Dropbox" in info_db["volume_name"]
 
     usage_db = provider_db.get_usage()
-    assert usage_db["total"] == 2 * (1024 ** 3)  # 2 GiB Dropbox quota
+    assert usage_db["total"] == 2 * (1024**3)  # 2 GiB Dropbox quota
     assert "Dropbox Cloud (2 GiB)" in usage_db["source"]
 
 
@@ -197,7 +194,9 @@ async def test_add_s3_and_cloud_drives_via_api(async_client, test_env, tmp_path)
 
 
 @pytest.mark.asyncio
-async def test_hybrid_pool_local_icloud_r2_usb_with_parity_recovery(test_env, tmp_path, monkeypatch):
+async def test_hybrid_pool_local_icloud_r2_usb_with_parity_recovery(
+    test_env, tmp_path, monkeypatch
+):
     """Verifies striped upload & XOR parity rebuild across a hybrid pool:
     Drive 1: Local SSD
     Drive 2: Apple iCloud Drive
@@ -225,8 +224,8 @@ async def test_hybrid_pool_local_icloud_r2_usb_with_parity_recovery(test_env, tm
     d4_path = tmp_path / "Volumes" / "CORSAIR_USB" / "FrankensteinStorage"
     d4_path.mkdir(parents=True)
 
-    d1 = add_drive(conn, str(d1_path), "Macintosh SSD", provider_type="local")
-    d2 = add_drive(conn, str(d2_path), "Apple iCloud Drive", provider_type="icloud")
+    add_drive(conn, str(d1_path), "Macintosh SSD", provider_type="local")
+    add_drive(conn, str(d2_path), "Apple iCloud Drive", provider_type="icloud")
     d3 = add_drive(
         conn,
         "s3://r2-vault/chunks",
@@ -239,7 +238,7 @@ async def test_hybrid_pool_local_icloud_r2_usb_with_parity_recovery(test_env, tm
             "secret_access_key": "mock_secret",
         },
     )
-    d4 = add_drive(conn, str(d4_path), "Corsair USB Pendrive", provider_type="local")
+    add_drive(conn, str(d4_path), "Corsair USB Pendrive", provider_type="local")
     conn.commit()
 
     # Upload a 150 KB test file across the 4-drive hybrid pool
@@ -255,7 +254,9 @@ async def test_hybrid_pool_local_icloud_r2_usb_with_parity_recovery(test_env, tm
     assert len(placed_drive_ids) >= 3
 
     # Find chunk placed on R2
-    cursor.execute("SELECT chunk_id FROM chunks WHERE file_id = ? AND drive_id = ?", (file_id, d3["id"]))
+    cursor.execute(
+        "SELECT chunk_id FROM chunks WHERE file_id = ? AND drive_id = ?", (file_id, d3["id"])
+    )
     r2_chunk_rows = cursor.fetchall()
     assert len(r2_chunk_rows) >= 1
 
@@ -278,12 +279,14 @@ async def test_hybrid_pool_local_icloud_r2_usb_with_parity_recovery(test_env, tm
     conn.commit()
 
     # Delete the R2 chunk to force heal_pool to reconstruct it
-    r2_prov = S3StorageProvider(config={
-        "endpoint_url": "https://account123.r2.cloudflarestorage.com",
-        "bucket": "r2-vault",
-        "access_key_id": "mock_key",
-        "secret_access_key": "mock_secret",
-    })
+    r2_prov = S3StorageProvider(
+        config={
+            "endpoint_url": "https://account123.r2.cloudflarestorage.com",
+            "bucket": "r2-vault",
+            "access_key_id": "mock_key",
+            "secret_access_key": "mock_secret",
+        }
+    )
     r2_prov.delete_chunk(r2_chunk_rows[0]["chunk_id"])
 
     heal_res = heal_pool(conn)

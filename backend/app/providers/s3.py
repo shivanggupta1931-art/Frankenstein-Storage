@@ -4,15 +4,15 @@ Implements StorageProvider using AWS Signature Version 4 (AWS4-HMAC-SHA256) via 
 hashlib and httpx, with zero external AWS SDK dependencies.
 """
 
-from datetime import datetime, timezone
 import hashlib
 import hmac
 import json
 import os
-from pathlib import Path
 import re
-from typing import Any
 import urllib.parse
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -37,7 +37,7 @@ def sign_s3_v4(
     host = parsed.netloc
     path = parsed.path or "/"
 
-    t = datetime.now(timezone.utc)
+    t = datetime.now(UTC)
     amz_date = t.strftime("%Y%m%dT%H%M%SZ")
     date_stamp = t.strftime("%Y%m%d")
 
@@ -67,7 +67,9 @@ def sign_s3_v4(
     credential_scope = f"{date_stamp}/{effective_region}/{service}/aws4_request"
     string_to_sign = f"AWS4-HMAC-SHA256\n{amz_date}\n{credential_scope}\n{canonical_request_hash}"
 
-    k_date = hmac.new(b"AWS4" + secret_key.encode("utf-8"), date_stamp.encode("utf-8"), hashlib.sha256).digest()
+    k_date = hmac.new(
+        b"AWS4" + secret_key.encode("utf-8"), date_stamp.encode("utf-8"), hashlib.sha256
+    ).digest()
     k_region = hmac.new(k_date, effective_region.encode("utf-8"), hashlib.sha256).digest()
     k_service = hmac.new(k_region, service.encode("utf-8"), hashlib.sha256).digest()
     k_signing = hmac.new(k_service, b"aws4_request", hashlib.sha256).digest()
@@ -179,7 +181,9 @@ class S3StorageProvider(StorageProvider):
 
     def put_chunk(self, chunk_id: str, data: bytes) -> None:
         if not self.check_availability():
-            raise AppError(503, "DRIVE_UNAVAILABLE", f"{self.provider_variant} is offline or unavailable")
+            raise AppError(
+                503, "DRIVE_UNAVAILABLE", f"{self.provider_variant} is offline or unavailable"
+            )
 
         if not HEX_UUID_PATTERN.match(chunk_id):
             raise AppError(400, "INVALID_CHUNK_ID", f"Invalid chunk_id format: {chunk_id}")
@@ -206,16 +210,24 @@ class S3StorageProvider(StorageProvider):
             with httpx.Client(timeout=15.0) as client:
                 res = client.put(obj_url, headers=signed_headers, content=data)
                 if res.status_code not in (200, 201):
-                    raise AppError(500, "S3_UPLOAD_FAILED", f"S3 PUT chunk failed with status {res.status_code}: {res.text[:200]}")
+                    raise AppError(
+                        500,
+                        "S3_UPLOAD_FAILED",
+                        f"S3 PUT chunk failed with status {res.status_code}: {res.text[:200]}",
+                    )
                 self._chunk_sizes[chunk_id] = len(data)
         except AppError:
             raise
         except Exception as e:
-            raise AppError(500, "S3_WRITE_FAILED", f"Failed to upload chunk to {self.provider_variant}: {e}")
+            raise AppError(
+                500, "S3_WRITE_FAILED", f"Failed to upload chunk to {self.provider_variant}: {e}"
+            )
 
     def get_chunk(self, chunk_id: str) -> bytes:
         if not self.check_availability():
-            raise AppError(503, "DRIVE_UNAVAILABLE", f"{self.provider_variant} is offline or unavailable")
+            raise AppError(
+                503, "DRIVE_UNAVAILABLE", f"{self.provider_variant} is offline or unavailable"
+            )
 
         if not HEX_UUID_PATTERN.match(chunk_id):
             raise AppError(400, "INVALID_CHUNK_ID", f"Invalid chunk_id format: {chunk_id}")
@@ -223,7 +235,9 @@ class S3StorageProvider(StorageProvider):
         if self.is_mock:
             chunk_file = self.mock_dir / chunk_id
             if not chunk_file.exists():
-                raise AppError(404, "CHUNK_NOT_FOUND", f"Chunk {chunk_id} not found in {self.provider_variant}")
+                raise AppError(
+                    404, "CHUNK_NOT_FOUND", f"Chunk {chunk_id} not found in {self.provider_variant}"
+                )
             return chunk_file.read_bytes()
 
         obj_url = self._get_object_url(chunk_id)
@@ -241,14 +255,24 @@ class S3StorageProvider(StorageProvider):
             with httpx.Client(timeout=15.0) as client:
                 res = client.get(obj_url, headers=signed_headers)
                 if res.status_code == 404:
-                    raise AppError(404, "CHUNK_NOT_FOUND", f"Chunk {chunk_id} not found in {self.provider_variant}")
+                    raise AppError(
+                        404,
+                        "CHUNK_NOT_FOUND",
+                        f"Chunk {chunk_id} not found in {self.provider_variant}",
+                    )
                 if res.status_code != 200:
-                    raise AppError(500, "S3_DOWNLOAD_FAILED", f"S3 GET chunk failed with status {res.status_code}")
+                    raise AppError(
+                        500,
+                        "S3_DOWNLOAD_FAILED",
+                        f"S3 GET chunk failed with status {res.status_code}",
+                    )
                 return res.content
         except AppError:
             raise
         except Exception as e:
-            raise AppError(500, "S3_READ_FAILED", f"Failed to read chunk from {self.provider_variant}: {e}")
+            raise AppError(
+                500, "S3_READ_FAILED", f"Failed to read chunk from {self.provider_variant}: {e}"
+            )
 
     def delete_chunk(self, chunk_id: str) -> bool:
         if not self.check_availability():
@@ -292,7 +316,7 @@ class S3StorageProvider(StorageProvider):
     def get_usage(self) -> dict[str, Any]:
         """Returns storage metrics for the S3 bucket."""
         # Standard cloud tier baseline: 10 GiB free tier (R2 has 10 GiB free storage)
-        quota_total = 10 * (1024 ** 3)
+        quota_total = 10 * (1024**3)
         used_bytes = sum(self._chunk_sizes.values())
         free_bytes = max(0, quota_total - used_bytes)
 

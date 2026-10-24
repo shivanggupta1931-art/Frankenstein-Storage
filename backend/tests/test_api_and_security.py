@@ -63,7 +63,9 @@ async def test_auth_token_enforcement(test_env):
 
     # Invalid token
     bad_headers = {"Authorization": "Bearer totally-fake-token-999"}
-    async with AsyncClient(transport=transport, base_url="http://127.0.0.1:8765", headers=bad_headers) as client:
+    async with AsyncClient(
+        transport=transport, base_url="http://127.0.0.1:8765", headers=bad_headers
+    ) as client:
         res = await client.get("/api/v1/overview")
         assert res.status_code == 401
         data = res.json()
@@ -123,6 +125,77 @@ async def test_host_and_origin_validation(test_env):
         res = await client.options("/api/v1/overview")
         assert res.status_code == 204
         assert res.headers.get("Access-Control-Allow-Origin") == "http://127.0.0.1:5174"
+
+    # Vercel preview domain origin (https://*.vercel.app)
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://127.0.0.1:8765",
+        headers={
+            **valid_token_header,
+            "Host": "127.0.0.1:8765",
+            "Origin": "https://frankenstein-storage-preview-123.vercel.app",
+        },
+    ) as client:
+        res = await client.get("/api/v1/overview")
+        assert res.status_code == 200
+        assert (
+            res.headers.get("Access-Control-Allow-Origin")
+            == "https://frankenstein-storage-preview-123.vercel.app"
+        )
+
+
+@pytest.mark.asyncio
+async def test_unified_single_port_static_serving(test_env):
+    """Test unified single-port production server: static files, index.html token injection, SPA fallback."""
+    transport = ASGITransport(app=app)
+
+    async with AsyncClient(transport=transport, base_url="http://127.0.0.1:8765") as client:
+        # 1. Root route serves index.html with injected session token without requiring Authorization header
+        res = await client.get("/")
+        assert res.status_code == 200
+        assert "text/html" in res.headers.get("content-type", "")
+        assert settings.session_token in res.text
+        assert "window.__FRANKENSTEIN_SESSION_TOKEN__" in res.text
+
+        # 2. SPA route fallback (e.g. /drives) also returns index.html with token
+        res_spa = await client.get("/drives")
+        assert res_spa.status_code == 200
+        assert "text/html" in res_spa.headers.get("content-type", "")
+        assert settings.session_token in res_spa.text
+
+        # 3. Nonexistent API route returns 404, not HTML
+        res_api_404 = await client.get(
+            "/api/v1/does_not_exist",
+            headers={"Authorization": f"Bearer {settings.session_token}"},
+        )
+        assert res_api_404.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_custom_allowed_hosts_and_origins(test_env, monkeypatch):
+    """Test custom allowed hosts/origins and ALLOW_ALL flags for cloud/docker."""
+    transport = ASGITransport(app=app)
+    valid_token_header = {"Authorization": f"Bearer {settings.session_token}"}
+
+    # 1. Custom host permitted when in allowed_hosts
+    monkeypatch.setattr(settings, "allowed_hosts", settings.allowed_hosts | {"my-cloud-app.com"})
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://127.0.0.1:8765",
+        headers={**valid_token_header, "Host": "my-cloud-app.com"},
+    ) as client:
+        res = await client.get("/api/v1/overview")
+        assert res.status_code == 200
+
+    # 2. Permitted when allow_all_hosts is set
+    monkeypatch.setattr(settings, "allow_all_hosts", True)
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://127.0.0.1:8765",
+        headers={**valid_token_header, "Host": "random-container-name:8765"},
+    ) as client:
+        res = await client.get("/api/v1/overview")
+        assert res.status_code == 200
 
 
 @pytest.mark.asyncio
@@ -193,7 +266,9 @@ async def test_file_preview_token_query_param(async_client):
         assert res_no_auth.status_code == 401
 
         # With query param token -> 200 OK and image/png
-        res_token = await client.get(f"/api/v1/files/{file_id}/preview?token={settings.session_token}")
+        res_token = await client.get(
+            f"/api/v1/files/{file_id}/preview?token={settings.session_token}"
+        )
         assert res_token.status_code == 200
         assert res_token.content == test_img
         assert res_token.headers.get("content-type") == "image/png"
@@ -291,5 +366,3 @@ async def test_locked_vault_blocks_all_operations(test_env, async_client):
 
     res_files_after = await async_client.get("/api/v1/files")
     assert res_files_after.status_code == 200
-
-

@@ -1,10 +1,10 @@
 """Local folder storage provider implementing the StorageProvider interface."""
 
-from datetime import datetime, timezone
 import os
 import re
 import shutil
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -28,11 +28,16 @@ class LocalFolderProvider(StorageProvider):
         self.chunks_dir = (self.dot_frankenstein / "chunks").resolve()
         self.tmp_dir = (self.dot_frankenstein / "tmp").resolve()
         self.simulated_offline = bool(simulated_offline)
-        
+
         # Verify root_path does not point inside an existing storage directory
-        if ".frankenstein" in self.root_path.parts or "frankenstein_storage" in self.root_path.parts:
-            raise AppError(400, "INVALID_PATH", "Drive root cannot be inside a vault storage directory")
-            
+        if (
+            ".frankenstein" in self.root_path.parts
+            or "frankenstein_storage" in self.root_path.parts
+        ):
+            raise AppError(
+                400, "INVALID_PATH", "Drive root cannot be inside a vault storage directory"
+            )
+
         self._ensure_dirs()
 
     def _is_external_or_visible(self) -> bool:
@@ -65,17 +70,31 @@ class LocalFolderProvider(StorageProvider):
                 # 1. Auto-flatten any nested chunks in self.chunks_dir (chunks/ab/cd/<chunk_id> -> chunks/<chunk_id>)
                 try:
                     for ab_dir in list(self.chunks_dir.iterdir()):
-                        if ab_dir.is_dir() and len(ab_dir.name) == 2 and not ab_dir.name.startswith("."):
+                        if (
+                            ab_dir.is_dir()
+                            and len(ab_dir.name) == 2
+                            and not ab_dir.name.startswith(".")
+                        ):
                             for cd_dir in list(ab_dir.iterdir()):
-                                if cd_dir.is_dir() and len(cd_dir.name) == 2 and not cd_dir.name.startswith("."):
+                                if (
+                                    cd_dir.is_dir()
+                                    and len(cd_dir.name) == 2
+                                    and not cd_dir.name.startswith(".")
+                                ):
                                     for f in list(cd_dir.iterdir()):
-                                        if f.is_file() and not f.name.startswith(".") and HEX_UUID_PATTERN.match(f.name):
+                                        if (
+                                            f.is_file()
+                                            and not f.name.startswith(".")
+                                            and HEX_UUID_PATTERN.match(f.name)
+                                        ):
                                             dest = self.chunks_dir / f.name
                                             if not dest.exists():
                                                 f.rename(dest)
                                             else:
                                                 f.unlink()
-                                        elif f.is_file() and (f.name.startswith("._") or f.name == ".DS_Store"):
+                                        elif f.is_file() and (
+                                            f.name.startswith("._") or f.name == ".DS_Store"
+                                        ):
                                             try:
                                                 f.unlink()
                                             except OSError:
@@ -84,7 +103,9 @@ class LocalFolderProvider(StorageProvider):
                                         cd_dir.rmdir()
                                     except OSError:
                                         pass
-                                elif cd_dir.is_file() and (cd_dir.name.startswith("._") or cd_dir.name == ".DS_Store"):
+                                elif cd_dir.is_file() and (
+                                    cd_dir.name.startswith("._") or cd_dir.name == ".DS_Store"
+                                ):
                                     try:
                                         cd_dir.unlink()
                                     except OSError:
@@ -93,7 +114,9 @@ class LocalFolderProvider(StorageProvider):
                                 ab_dir.rmdir()
                             except OSError:
                                 pass
-                        elif ab_dir.is_file() and (ab_dir.name.startswith("._") or ab_dir.name == ".DS_Store"):
+                        elif ab_dir.is_file() and (
+                            ab_dir.name.startswith("._") or ab_dir.name == ".DS_Store"
+                        ):
                             try:
                                 ab_dir.unlink()
                             except OSError:
@@ -161,32 +184,33 @@ class LocalFolderProvider(StorageProvider):
         try:
             if not self.chunks_dir.exists():
                 return
-            
+
             chunk_files = [
-                f for f in self.chunks_dir.iterdir()
+                f
+                for f in self.chunks_dir.iterdir()
                 if f.is_file() and not f.name.startswith(".") and HEX_UUID_PATTERN.match(f.name)
             ]
             chunk_files.sort(key=lambda x: x.name)
-            
+
             total_bytes = sum(f.stat().st_size for f in chunk_files)
             dev_info = self.get_device_info()
             vol_name = dev_info.get("volume_name") or self.root_path.name
-            
-            now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-            
+
+            now_str = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+
             lines = [
                 "=" * 80,
                 "🧟 FRANKENSTEIN STORAGE — EXTERNAL DRIVE MANIFEST",
                 "=" * 80,
                 f"Drive / Volume   : {vol_name}",
                 f"Storage Path     : {self.root_path}",
-                f"Status           : ONLINE & ACTIVE",
-                f"Encryption       : AES-256-GCM (Zero-Knowledge Authenticated)",
-                f"Redundancy       : Striped XOR Parity & Cross-Drive Mirroring",
+                "Status           : ONLINE & ACTIVE",
+                "Encryption       : AES-256-GCM (Zero-Knowledge Authenticated)",
+                "Redundancy       : Striped XOR Parity & Cross-Drive Mirroring",
                 f"Last Updated     : {now_str}",
                 "-" * 80,
                 "STORED ENCRYPTED CHUNKS DIRECTORY:",
-                f"  frankenstein_storage/chunks/ (flat directory structure)",
+                "  frankenstein_storage/chunks/ (flat directory structure)",
                 "",
                 "Summary:",
                 f"  Total Chunks Stored : {len(chunk_files)}",
@@ -195,27 +219,31 @@ class LocalFolderProvider(StorageProvider):
                 f"{'#':<4} {'Chunk ID':<36} {'Size (Bytes)':<16} {'Last Modified (UTC)'}",
                 "-" * 80,
             ]
-            
+
             for idx, cf in enumerate(chunk_files, 1):
                 st = cf.stat()
-                mtime_str = datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                mtime_str = datetime.fromtimestamp(st.st_mtime, tz=UTC).strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
                 lines.append(f"{idx:<4} {cf.name:<36} {st.st_size:<16,} {mtime_str}")
-                
-            lines.extend([
-                "=" * 80,
-                "⚠️ NOTICE:",
-                "Do not edit or delete these encrypted chunk files directly.",
-                "To unlock, preview, or restore files, access the Frankenstein dashboard at:",
-                "http://127.0.0.1:5173",
-                "=" * 80,
-                "",
-            ])
-            
+
+            lines.extend(
+                [
+                    "=" * 80,
+                    "⚠️ NOTICE:",
+                    "Do not edit or delete these encrypted chunk files directly.",
+                    "To unlock, preview, or restore files, access the Frankenstein dashboard at:",
+                    "http://127.0.0.1:5173",
+                    "=" * 80,
+                    "",
+                ]
+            )
+
             content = "\n".join(lines)
-            
+
             manifest_root = self.root_path / "VAULT_MANIFEST.txt"
             manifest_root.write_text(content, encoding="utf-8")
-            
+
             manifest_dot = self.dot_frankenstein / "VAULT_MANIFEST.txt"
             if manifest_dot != manifest_root:
                 manifest_dot.write_text(content, encoding="utf-8")
@@ -228,14 +256,14 @@ class LocalFolderProvider(StorageProvider):
 
     def _get_chunk_path(self, chunk_id: str) -> Path:
         self._validate_chunk_id(chunk_id)
-        
+
         # On external USB drives or visible storage folders:
         # Chunks are stored directly in chunks/<chunk_id> for flat macOS Finder visibility!
         if self._is_external_or_visible():
             flat_target = (self.chunks_dir / chunk_id).resolve()
             if flat_target.exists():
                 return flat_target
-                
+
             # Backward compatibility: check legacy nested chunks/ab/cd/<chunk_id>
             ab = chunk_id[:2]
             cd = chunk_id[2:4]
@@ -244,7 +272,9 @@ class LocalFolderProvider(StorageProvider):
                 return nested_target
 
             # Check legacy hidden .frankenstein directory
-            legacy_dot = (self.root_path / ".frankenstein" / "chunks" / ab / cd / chunk_id).resolve()
+            legacy_dot = (
+                self.root_path / ".frankenstein" / "chunks" / ab / cd / chunk_id
+            ).resolve()
             if legacy_dot.exists():
                 return legacy_dot
             legacy_dot_flat = (self.root_path / ".frankenstein" / "chunks" / chunk_id).resolve()
@@ -266,10 +296,12 @@ class LocalFolderProvider(StorageProvider):
         ab = chunk_id[:2]
         cd = chunk_id[2:4]
         target = (self.chunks_dir / ab / cd / chunk_id).resolve()
-        
+
         # Check backward compatibility with legacy .frankenstein path
         if not target.exists():
-            legacy_dot = (self.root_path / ".frankenstein" / "chunks" / ab / cd / chunk_id).resolve()
+            legacy_dot = (
+                self.root_path / ".frankenstein" / "chunks" / ab / cd / chunk_id
+            ).resolve()
             if legacy_dot.exists():
                 return legacy_dot
 
@@ -278,7 +310,7 @@ class LocalFolderProvider(StorageProvider):
             target.relative_to(self.chunks_dir)
         except ValueError:
             raise AppError(400, "SECURITY_ERROR", "Path traversal or symlink escape detected")
-            
+
         return target
 
     def check_availability(self) -> bool:
@@ -295,7 +327,11 @@ class LocalFolderProvider(StorageProvider):
                     if not vol_root.exists() or not vol_root.is_dir():
                         return False
 
-            return self.root_path.exists() and self.root_path.is_dir() and os.access(self.root_path, os.R_OK | os.W_OK)
+            return (
+                self.root_path.exists()
+                and self.root_path.is_dir()
+                and os.access(self.root_path, os.R_OK | os.W_OK)
+            )
         except Exception:
             return False
 
@@ -349,10 +385,18 @@ class LocalFolderProvider(StorageProvider):
                             pass
 
             path_str = str(self.root_path)
-            is_icloud = "Mobile Documents" in path_str or "com~apple~CloudDocs" in path_str or "iCloud Drive" in path_str
+            is_icloud = (
+                "Mobile Documents" in path_str
+                or "com~apple~CloudDocs" in path_str
+                or "iCloud Drive" in path_str
+            )
             is_onedrive = "OneDrive" in path_str
             is_dropbox = "Dropbox" in path_str
-            is_gdrive = "GoogleDrive" in path_str or "My Drive" in path_str or ("CloudStorage" in path_str and not is_onedrive and not is_dropbox)
+            is_gdrive = (
+                "GoogleDrive" in path_str
+                or "My Drive" in path_str
+                or ("CloudStorage" in path_str and not is_onedrive and not is_dropbox)
+            )
             is_cloud = is_icloud or is_onedrive or is_dropbox or is_gdrive
 
             # If this is a cloud-synced folder, reflect realistic cloud tier quota
@@ -361,22 +405,22 @@ class LocalFolderProvider(StorageProvider):
                 folder_used = self._get_folder_size(self.root_path)
                 real_used = max(folder_used, measured)
                 if is_icloud:
-                    cloud_total = 5 * (1024 ** 3)
+                    cloud_total = 5 * (1024**3)
                     cloud_source = "Apple iCloud Drive (5 GiB)"
                     cloud_vol = "Apple iCloud Drive (Cloud Synced)"
                     cloud_dev_id = "icloud_drive_cloud_storage"
                 elif is_onedrive:
-                    cloud_total = 5 * (1024 ** 3)
+                    cloud_total = 5 * (1024**3)
                     cloud_source = "Microsoft OneDrive (5 GiB)"
                     cloud_vol = "Microsoft OneDrive (Cloud Synced)"
                     cloud_dev_id = "onedrive_cloud_storage"
                 elif is_dropbox:
-                    cloud_total = 2 * (1024 ** 3)
+                    cloud_total = 2 * (1024**3)
                     cloud_source = "Dropbox Cloud (2 GiB)"
                     cloud_vol = "Dropbox (Cloud Synced)"
                     cloud_dev_id = "dropbox_cloud_storage"
                 else:
-                    cloud_total = 15 * (1024 ** 3)
+                    cloud_total = 15 * (1024**3)
                     cloud_source = "Google Drive Cloud (15 GiB)"
                     cloud_vol = "Google Drive (Cloud Synced)"
                     cloud_dev_id = "gdrive_cloud_storage"
@@ -421,10 +465,18 @@ class LocalFolderProvider(StorageProvider):
     def get_device_info(self) -> dict[str, Any]:
         try:
             path_str = str(self.root_path)
-            is_icloud = "Mobile Documents" in path_str or "com~apple~CloudDocs" in path_str or "iCloud Drive" in path_str
+            is_icloud = (
+                "Mobile Documents" in path_str
+                or "com~apple~CloudDocs" in path_str
+                or "iCloud Drive" in path_str
+            )
             is_onedrive = "OneDrive" in path_str
             is_dropbox = "Dropbox" in path_str
-            is_gdrive = "GoogleDrive" in path_str or "My Drive" in path_str or ("CloudStorage" in path_str and not is_onedrive and not is_dropbox)
+            is_gdrive = (
+                "GoogleDrive" in path_str
+                or "My Drive" in path_str
+                or ("CloudStorage" in path_str and not is_onedrive and not is_dropbox)
+            )
 
             if is_icloud:
                 return {
@@ -474,7 +526,9 @@ class LocalFolderProvider(StorageProvider):
                 if len(parts) >= 3:
                     cand_name = parts[2]
                     # Exclude internal boot volume aliases like Macintosh HD or Recovery
-                    if cand_name not in ("Macintosh HD", "Recovery") and not cand_name.startswith("."):
+                    if cand_name not in ("Macintosh HD", "Recovery") and not cand_name.startswith(
+                        "."
+                    ):
                         is_external_usb = True
                         vol_root_name = cand_name
 
@@ -584,7 +638,9 @@ class LocalFolderProvider(StorageProvider):
             try:
                 resolved.relative_to(self.chunks_dir)
             except ValueError:
-                raise AppError(400, "SECURITY_ERROR", "Chunk is a symlink escaping storage boundary")
+                raise AppError(
+                    400, "SECURITY_ERROR", "Chunk is a symlink escaping storage boundary"
+                )
 
         try:
             with open(chunk_path, "rb") as f:

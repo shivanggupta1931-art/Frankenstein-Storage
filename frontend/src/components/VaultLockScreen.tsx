@@ -1,11 +1,13 @@
 import React, { useState } from "react";
-import { Lock, Shield, Eye, EyeOff, KeyRound, AlertCircle, HardDrive, Cloud, ShieldAlert } from "lucide-react";
+import { Lock, Shield, Eye, EyeOff, KeyRound, AlertCircle, HardDrive, Cloud, ShieldAlert, Settings } from "lucide-react";
+import { api } from "../services/api";
 
 interface VaultLockScreenProps {
   onUnlock: (password: string) => Promise<void>;
+  onOpenSettings?: () => void;
 }
 
-export const VaultLockScreen: React.FC<VaultLockScreenProps> = ({ onUnlock }) => {
+export const VaultLockScreen: React.FC<VaultLockScreenProps> = ({ onUnlock, onOpenSettings }) => {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -139,8 +141,8 @@ export const VaultLockScreen: React.FC<VaultLockScreenProps> = ({ onUnlock }) =>
               className="animate-slide-up"
               style={{
                 display: "flex",
-                alignItems: "center",
-                gap: "10px",
+                flexDirection: "column",
+                gap: "8px",
                 padding: "12px 14px",
                 backgroundColor: "rgba(239, 68, 68, 0.12)",
                 border: "1px solid rgba(239, 68, 68, 0.4)",
@@ -150,8 +152,47 @@ export const VaultLockScreen: React.FC<VaultLockScreenProps> = ({ onUnlock }) =>
                 textAlign: "left",
               }}
             >
-              <AlertCircle size={16} style={{ flexShrink: 0 }} />
-              <span>{error}</span>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <AlertCircle size={16} style={{ flexShrink: 0 }} />
+                <span style={{ fontWeight: 600 }}>
+                  {error.toLowerCase().includes("fetch") ? "Cannot connect to backend server" : error}
+                </span>
+              </div>
+              {error.toLowerCase().includes("fetch") && (
+                <div style={{ fontSize: "11px", color: "var(--text-secondary)", lineHeight: "1.5" }}>
+                  <span>Attempted URL: </span>
+                  <code style={{ color: "var(--text-primary)", backgroundColor: "rgba(0,0,0,0.2)", padding: "1px 4px", borderRadius: "3px" }}>
+                    {api.getBaseUrl()}
+                  </code>
+                  <p style={{ margin: "6px 0 0" }}>
+                    Your browser cannot reach the backend. If this site is loaded over HTTPS on Vercel, browsers block unencrypted HTTP/localhost connections (Mixed Content), or your backend server is offline.
+                  </p>
+                  {onOpenSettings && (
+                    <div style={{ marginTop: "8px" }}>
+                      <button
+                        type="button"
+                        onClick={onOpenSettings}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "6px",
+                          fontSize: "11px",
+                          fontWeight: 600,
+                          padding: "5px 10px",
+                          backgroundColor: "var(--accent-cyan-solid)",
+                          color: "#0f172a",
+                          borderRadius: "var(--radius-sm)",
+                          border: "none",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <Settings size={12} />
+                        <span>Configure Backend API URL & Token</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

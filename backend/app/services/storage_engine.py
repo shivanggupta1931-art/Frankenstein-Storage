@@ -27,7 +27,7 @@ def pick_placement_drives(
     stripe_index: int = 0,
 ) -> list[dict[str, Any]]:
     """Selects `count` distinct placement-eligible drives for a stripe or chunk.
-    
+
     Rules:
     - Never places two chunks of the same stripe on the same drive (strictly distinct drive IDs).
     - Excludes drives below reserve or offline (already filtered in available_drives).
@@ -36,8 +36,10 @@ def pick_placement_drives(
     """
     n = len(available_drives)
     if n < count:
-        raise AppError(507, "INSUFFICIENT_STORAGE", f"Need at least {count} eligible drives, found {n}")
-    
+        raise AppError(
+            507, "INSUFFICIENT_STORAGE", f"Need at least {count} eligible drives, found {n}"
+        )
+
     if n == count:
         return list(available_drives)
 
@@ -74,7 +76,9 @@ def pick_placement_drives(
     return selected[:count]
 
 
-def pick_stripe_drives(available_drives: list[dict[str, Any]], stripe_index: int) -> list[dict[str, Any]]:
+def pick_stripe_drives(
+    available_drives: list[dict[str, Any]], stripe_index: int
+) -> list[dict[str, Any]]:
     """Selects 3 distinct drives for a stripe with rotating placement."""
     return pick_placement_drives(available_drives, 3, stripe_index)
 
@@ -92,27 +96,37 @@ def startup_cleanup(conn: sqlite3.Connection) -> None:
         chunks = cursor.fetchall()
         for chunk in chunks:
             # Try to delete chunk from disk or cloud
-            cursor.execute("SELECT id, display_name, path, status, simulated_offline, provider_type, config FROM drives WHERE id = ?", (chunk["drive_id"],))
+            cursor.execute(
+                "SELECT id, display_name, path, status, simulated_offline, provider_type, config FROM drives WHERE id = ?",
+                (chunk["drive_id"],),
+            )
             drive_row = cursor.fetchone()
             if drive_row:
                 prov = get_drive_provider(drive_row)
                 prov.delete_chunk(chunk["chunk_id"])
-        
-        conn.execute("UPDATE files SET status = 'failed', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (fid,))
+
+        conn.execute(
+            "UPDATE files SET status = 'failed', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (fid,),
+        )
 
     # Clean orphaned temp files in all drives
-    cursor.execute("SELECT id, display_name, path, status, simulated_offline, provider_type, config FROM drives")
+    cursor.execute(
+        "SELECT id, display_name, path, status, simulated_offline, provider_type, config FROM drives"
+    )
     for d in cursor.fetchall():
         prov = get_drive_provider(d)
         if hasattr(prov, "cleanup_temp_files"):
             prov.cleanup_temp_files()
-    
+
     conn.commit()
 
 
 def get_available_drives_for_storage(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     cursor = conn.cursor()
-    cursor.execute("SELECT id, display_name, path, status, simulated_offline, provider_type, config FROM drives WHERE status = 'online' AND simulated_offline = 0")
+    cursor.execute(
+        "SELECT id, display_name, path, status, simulated_offline, provider_type, config FROM drives WHERE status = 'online' AND simulated_offline = 0"
+    )
     rows = cursor.fetchall()
 
     available = []
@@ -125,17 +139,19 @@ def get_available_drives_for_storage(conn: sqlite3.Connection) -> list[dict[str,
             reserve = calculate_reserve(total)
             effective_free = max(0, free - reserve)
             if effective_free >= settings.chunk_size_bytes:
-                available.append({
-                    "id": row["id"],
-                    "display_name": row["display_name"],
-                    "path": row["path"],
-                    "provider": provider,
-                    "free": free,
-                    "total": total,
-                    "reserve": reserve,
-                    "effective_free": effective_free,
-                    "device_id": usage.get("dev_id"),
-                })
+                available.append(
+                    {
+                        "id": row["id"],
+                        "display_name": row["display_name"],
+                        "path": row["path"],
+                        "provider": provider,
+                        "free": free,
+                        "total": total,
+                        "reserve": reserve,
+                        "effective_free": effective_free,
+                        "device_id": usage.get("dev_id"),
+                    }
+                )
 
     available.sort(key=lambda d: d["effective_free"], reverse=True)
     return available
@@ -156,7 +172,7 @@ async def read_stream_chunk(stream: Any, size: int, buffer: bytearray) -> bytes:
         if block:
             result.extend(block)
         return bytes(result)
-    
+
     while len(buffer) < size:
         try:
             chunk = await stream.__anext__()
@@ -195,12 +211,16 @@ async def upload_stream(
 
     # Check existing file
     cursor = conn.cursor()
-    cursor.execute("SELECT id, status FROM files WHERE folder = ? AND name = ?", (folder, valid_name))
+    cursor.execute(
+        "SELECT id, status FROM files WHERE folder = ? AND name = ?", (folder, valid_name)
+    )
     existing = cursor.fetchone()
 
     if existing:
         if existing["status"] == "complete" and not overwrite:
-            raise AppError(409, "FILE_ALREADY_EXISTS", f"File '{valid_name}' already exists in '{folder}'")
+            raise AppError(
+                409, "FILE_ALREADY_EXISTS", f"File '{valid_name}' already exists in '{folder}'"
+            )
         else:
             # Delete old file
             delete_file(conn, existing["id"])
@@ -250,7 +270,7 @@ async def upload_stream(
     try:
         # Read initial block to determine file scale and EOF
         initial_block = await read_stream_chunk(stream, settings.chunk_size_bytes, async_buffer)
-        
+
         # Check if more bytes exist
         if not initial_block:
             has_more = False
@@ -272,7 +292,11 @@ async def upload_stream(
         if mode == "whole":
             effective_mode = "whole"
             protection_status = "unprotected"
-            unprotected_reason = "Single-drive storage requested" if len(available_drives) > 1 else "Only 1 drive available in pool"
+            unprotected_reason = (
+                "Single-drive storage requested"
+                if len(available_drives) > 1
+                else "Only 1 drive available in pool"
+            )
         elif mode == "chunked_parity":
             effective_mode = "chunked_parity"
             protection_status = "parity"
@@ -336,7 +360,9 @@ async def upload_stream(
         elif effective_mode == "mirrored":
             # Store 2 mirrored copies per chunk across 2 distinct drives
             while True:
-                curr_block = await read_stream_chunk(stream, settings.chunk_size_bytes, async_buffer)
+                curr_block = await read_stream_chunk(
+                    stream, settings.chunk_size_bytes, async_buffer
+                )
                 if not curr_block:
                     break
                 whole_hasher.update(curr_block)
@@ -387,7 +413,9 @@ async def upload_stream(
                     if len(data0) < settings.chunk_size_bytes:
                         data1 = b""
                     else:
-                        data1 = await read_stream_chunk(stream, settings.chunk_size_bytes, async_buffer)
+                        data1 = await read_stream_chunk(
+                            stream, settings.chunk_size_bytes, async_buffer
+                        )
                         if data1:
                             whole_hasher.update(data1)
                             total_file_size += len(data1)
@@ -446,7 +474,14 @@ async def upload_stream(
             """UPDATE files
                SET size = ?, sha256 = ?, storage_mode = ?, protection_status = ?, unprotected_reason = ?, status = 'complete', updated_at = CURRENT_TIMESTAMP
                WHERE id = ?""",
-            (total_file_size, final_sha256, effective_mode, protection_status, unprotected_reason, file_id),
+            (
+                total_file_size,
+                final_sha256,
+                effective_mode,
+                protection_status,
+                unprotected_reason,
+                file_id,
+            ),
         )
         conn.execute(
             "INSERT INTO operation_log (operation, details, status) VALUES (?, ?, ?)",
@@ -461,7 +496,9 @@ async def upload_stream(
         protection_label = (
             "Parity-protected"
             if protection_status == "parity"
-            else ("Mirrored (2x)" if protection_status == "mirrored" else "Unprotected (single drive)")
+            else (
+                "Mirrored (2x)" if protection_status == "mirrored" else "Unprotected (single drive)"
+            )
         )
         return {
             "id": file_id,
@@ -496,20 +533,29 @@ async def upload_stream(
         raise AppError(500, "UPLOAD_FAILED", f"File upload failed: {e}")
 
 
-def download_stream(conn: sqlite3.Connection, file_id: str) -> tuple[dict[str, Any], Generator[bytes, None, None], bool]:
+def download_stream(
+    conn: sqlite3.Connection, file_id: str
+) -> tuple[dict[str, Any], Generator[bytes, None, None], bool]:
     """Streams file download, recovering missing/corrupted chunks using rotating XOR parity.
-    
+
     Returns (file_metadata, generator, was_rebuilt_from_parity).
     """
     key = key_manager.get_key()
 
     cursor = conn.cursor()
-    cursor.execute("SELECT id, name, folder, size, sha256, storage_mode, status FROM files WHERE id = ?", (file_id,))
+    cursor.execute(
+        "SELECT id, name, folder, size, sha256, storage_mode, status FROM files WHERE id = ?",
+        (file_id,),
+    )
     file_row = cursor.fetchone()
     if not file_row:
         raise AppError(404, "FILE_NOT_FOUND", f"File with id '{file_id}' not found")
     if file_row["status"] != "complete":
-        raise AppError(400, "FILE_INCOMPLETE", f"File '{file_row['name']}' is not in complete status (status: {file_row['status']})")
+        raise AppError(
+            400,
+            "FILE_INCOMPLETE",
+            f"File '{file_row['name']}' is not in complete status (status: {file_row['status']})",
+        )
 
     # Fetch all chunks
     cursor.execute(
@@ -520,7 +566,9 @@ def download_stream(conn: sqlite3.Connection, file_id: str) -> tuple[dict[str, A
     all_chunks = cursor.fetchall()
 
     # Pre-cache drive providers
-    cursor.execute("SELECT id, display_name, path, status, simulated_offline, provider_type, config FROM drives")
+    cursor.execute(
+        "SELECT id, display_name, path, status, simulated_offline, provider_type, config FROM drives"
+    )
     drive_cache = {d["id"]: d for d in cursor.fetchall()}
 
     file_metadata = dict(file_row)
@@ -529,23 +577,41 @@ def download_stream(conn: sqlite3.Connection, file_id: str) -> tuple[dict[str, A
     def generator() -> Generator[bytes, None, None]:
         if file_metadata.get("storage_mode") == "whole":
             if not all_chunks:
-                raise AppError(500, "CORRUPT_METADATA", "No chunk records found for whole encrypted object")
+                raise AppError(
+                    500, "CORRUPT_METADATA", "No chunk records found for whole encrypted object"
+                )
             chunk_rec = all_chunks[0]
             drive_info = drive_cache.get(chunk_rec["drive_id"])
             if not drive_info:
-                raise AppError(503, "DRIVE_UNAVAILABLE", "Drive for whole encrypted object is missing from database")
+                raise AppError(
+                    503,
+                    "DRIVE_UNAVAILABLE",
+                    "Drive for whole encrypted object is missing from database",
+                )
             provider = get_drive_provider(drive_info)
             if not provider.check_availability():
-                raise AppError(503, "DRIVE_UNAVAILABLE", f"Storage drive '{drive_info['display_name']}' is offline/unavailable. Whole-object mode has no parity redundancy.")
+                raise AppError(
+                    503,
+                    "DRIVE_UNAVAILABLE",
+                    f"Storage drive '{drive_info['display_name']}' is offline/unavailable. Whole-object mode has no parity redundancy.",
+                )
             try:
                 raw_chunk = provider.get_chunk(chunk_rec["chunk_id"])
             except Exception as e:
-                raise AppError(500, "CHUNK_READ_FAILED", f"Failed to read whole encrypted object: {e}")
+                raise AppError(
+                    500, "CHUNK_READ_FAILED", f"Failed to read whole encrypted object: {e}"
+                )
             if hashlib.sha256(raw_chunk).hexdigest() != chunk_rec["sha256"]:
-                raise AppError(400, "INTEGRITY_MISMATCH", f"Chunk SHA-256 hash mismatch on drive '{drive_info['display_name']}'")
+                raise AppError(
+                    400,
+                    "INTEGRITY_MISMATCH",
+                    f"Chunk SHA-256 hash mismatch on drive '{drive_info['display_name']}'",
+                )
             plain = decrypt_chunk(raw_chunk, key)
             if hashlib.sha256(plain).hexdigest() != file_metadata["sha256"]:
-                raise AppError(400, "INTEGRITY_MISMATCH", "Plaintext hash mismatch after decryption")
+                raise AppError(
+                    400, "INTEGRITY_MISMATCH", "Plaintext hash mismatch after decryption"
+                )
             yield plain
             return
 
@@ -576,12 +642,16 @@ def download_stream(conn: sqlite3.Connection, file_id: str) -> tuple[dict[str, A
                         continue
                     provider = get_drive_provider(d_info)
                     if not provider.check_availability():
-                        failure_reasons.append(f"Drive '{d_info['display_name']}' is offline/unavailable")
+                        failure_reasons.append(
+                            f"Drive '{d_info['display_name']}' is offline/unavailable"
+                        )
                         continue
                     try:
                         chunk_bytes = provider.get_chunk(c_rec["chunk_id"])
                         if hashlib.sha256(chunk_bytes).hexdigest() != c_rec["sha256"]:
-                            failure_reasons.append(f"Drive '{d_info['display_name']}' chunk hash mismatch")
+                            failure_reasons.append(
+                                f"Drive '{d_info['display_name']}' chunk hash mismatch"
+                            )
                             continue
                         raw_enc = chunk_bytes
                         if pos != 0:
@@ -589,6 +659,13 @@ def download_stream(conn: sqlite3.Connection, file_id: str) -> tuple[dict[str, A
                         break
                     except Exception as e:
                         failure_reasons.append(f"Drive '{d_info['display_name']}' read error: {e}")
+
+                # If any replica in this stripe is offline/unavailable, mark was_rebuilt = True (failover retrieval)
+                for p_check in stripe_chunks:
+                    d_chk = drive_cache.get(p_check["drive_id"])
+                    if not d_chk or not get_drive_provider(d_chk).check_availability():
+                        rebuilt_flags["was_rebuilt"] = True
+                        break
 
                 if raw_enc is None:
                     raise AppError(
@@ -612,7 +689,9 @@ def download_stream(conn: sqlite3.Connection, file_id: str) -> tuple[dict[str, A
                 yield output_chunk
 
             if hasher.hexdigest() != file_metadata["sha256"]:
-                raise AppError(400, "INTEGRITY_MISMATCH", "Plaintext hash mismatch after decryption")
+                raise AppError(
+                    400, "INTEGRITY_MISMATCH", "Plaintext hash mismatch after decryption"
+                )
             return
 
         # Chunked parity mode
@@ -628,11 +707,13 @@ def download_stream(conn: sqlite3.Connection, file_id: str) -> tuple[dict[str, A
         for s_idx in sorted(stripes_map.keys()):
             stripe_chunks = stripes_map[s_idx]
             if len(stripe_chunks) != 3:
-                raise AppError(500, "CORRUPT_METADATA", f"Stripe {s_idx} does not have exactly 3 chunks")
+                raise AppError(
+                    500, "CORRUPT_METADATA", f"Stripe {s_idx} does not have exactly 3 chunks"
+                )
 
             # Sort chunks by slot position (0, 1, 2)
             stripe_chunks_by_pos = {c["position"]: c for c in stripe_chunks}
-            
+
             loaded_data: dict[int, bytes] = {}
             missing_or_corrupt_positions: list[int] = []
             failure_reasons: list[str] = []
@@ -640,7 +721,7 @@ def download_stream(conn: sqlite3.Connection, file_id: str) -> tuple[dict[str, A
             for pos in (0, 1, 2):
                 chunk_rec = stripe_chunks_by_pos[pos]
                 drive_info = drive_cache.get(chunk_rec["drive_id"])
-                
+
                 if not drive_info:
                     missing_or_corrupt_positions.append(pos)
                     failure_reasons.append(f"Drive {chunk_rec['drive_id']} missing from DB")
@@ -649,7 +730,9 @@ def download_stream(conn: sqlite3.Connection, file_id: str) -> tuple[dict[str, A
                 provider = get_drive_provider(drive_info)
                 if not provider.check_availability():
                     missing_or_corrupt_positions.append(pos)
-                    failure_reasons.append(f"Drive '{drive_info['display_name']}' is offline/unavailable")
+                    failure_reasons.append(
+                        f"Drive '{drive_info['display_name']}' is offline/unavailable"
+                    )
                     continue
 
                 try:
@@ -657,7 +740,9 @@ def download_stream(conn: sqlite3.Connection, file_id: str) -> tuple[dict[str, A
                     actual_sha256 = hashlib.sha256(raw_chunk).hexdigest()
                     if actual_sha256 != chunk_rec["sha256"]:
                         missing_or_corrupt_positions.append(pos)
-                        failure_reasons.append(f"Drive '{drive_info['display_name']}' chunk hash mismatch (disk corruption)")
+                        failure_reasons.append(
+                            f"Drive '{drive_info['display_name']}' chunk hash mismatch (disk corruption)"
+                        )
                         continue
                     loaded_data[pos] = raw_chunk
                 except Exception as e:
@@ -686,7 +771,9 @@ def download_stream(conn: sqlite3.Connection, file_id: str) -> tuple[dict[str, A
                 actual_rebuilt_sha256 = hashlib.sha256(rebuilt_chunk).hexdigest()
 
                 if actual_rebuilt_sha256 != expected_sha256:
-                    raise AppError(400, "INTEGRITY_MISMATCH", f"Rebuilt chunk hash mismatch in stripe {s_idx}")
+                    raise AppError(
+                        400, "INTEGRITY_MISMATCH", f"Rebuilt chunk hash mismatch in stripe {s_idx}"
+                    )
 
                 loaded_data[missing_pos] = rebuilt_chunk
 
@@ -730,7 +817,6 @@ def retrieve_file(conn: sqlite3.Connection, file_id: str) -> tuple[dict[str, Any
     return meta, content
 
 
-
 def delete_file(conn: sqlite3.Connection, file_id: str) -> None:
     """Deletes a file and all its chunks from the storage drives."""
     cursor = conn.cursor()
@@ -744,7 +830,9 @@ def delete_file(conn: sqlite3.Connection, file_id: str) -> None:
     chunks = cursor.fetchall()
 
     # Pre-cache drives
-    cursor.execute("SELECT id, display_name, path, status, simulated_offline, provider_type, config FROM drives")
+    cursor.execute(
+        "SELECT id, display_name, path, status, simulated_offline, provider_type, config FROM drives"
+    )
     drive_cache = {d["id"]: d for d in cursor.fetchall()}
 
     for c in chunks:
@@ -777,38 +865,46 @@ def get_file_chunks_map(conn: sqlite3.Connection, file_id: str) -> list[dict[str
            ORDER BY c.stripe_index ASC, c.position ASC""",
         (file_id,),
     )
-    
+
     chunks = []
     for r in cursor.fetchall():
         is_offline = bool(r["simulated_offline"]) or r["status"] != "online"
-        chunks.append({
-            "id": r["id"],
-            "stripe_index": r["stripe_index"],
-            "position": r["position"],
-            "is_parity": bool(r["is_parity"]),
-            "drive_id": r["drive_id"],
-            "drive_name": r["display_name"],
-            "chunk_id": r["chunk_id"],
-            "sha256": r["sha256"],
-            "size": r["size"],
-            "drive_offline": is_offline,
-        })
+        chunks.append(
+            {
+                "id": r["id"],
+                "stripe_index": r["stripe_index"],
+                "position": r["position"],
+                "is_parity": bool(r["is_parity"]),
+                "drive_id": r["drive_id"],
+                "drive_name": r["display_name"],
+                "chunk_id": r["chunk_id"],
+                "sha256": r["sha256"],
+                "size": r["size"],
+                "drive_offline": is_offline,
+            }
+        )
     return chunks
 
 
 def verify_integrity(conn: sqlite3.Connection, file_id: str | None = None) -> dict[str, Any]:
     """Verifies chunk integrity across drives.
-    
+
     Reports healthy, degraded (rebuildable via parity), or corrupt files.
     """
     cursor = conn.cursor()
     if file_id:
-        cursor.execute("SELECT id, name, size, sha256, storage_mode FROM files WHERE id = ?", (file_id,))
+        cursor.execute(
+            "SELECT id, name, size, sha256, storage_mode FROM files WHERE id = ?", (file_id,)
+        )
     else:
-        cursor.execute("SELECT id, name, size, sha256, storage_mode FROM files WHERE status = 'complete'")
+        cursor.execute(
+            "SELECT id, name, size, sha256, storage_mode FROM files WHERE status = 'complete'"
+        )
     files = cursor.fetchall()
 
-    cursor.execute("SELECT id, display_name, path, status, simulated_offline, provider_type, config FROM drives")
+    cursor.execute(
+        "SELECT id, display_name, path, status, simulated_offline, provider_type, config FROM drives"
+    )
     drive_cache = {d["id"]: d for d in cursor.fetchall()}
 
     total_files = len(files)
@@ -840,24 +936,32 @@ def verify_integrity(conn: sqlite3.Connection, file_id: str | None = None) -> di
                 if not d:
                     file_corrupted = True
                     corrupted_chunks_count += 1
-                    stripe_issues.append({"stripe_index": 0, "state": "unrecoverable", "failures": 1})
+                    stripe_issues.append(
+                        {"stripe_index": 0, "state": "unrecoverable", "failures": 1}
+                    )
                 else:
                     prov = get_drive_provider(d)
                     if not prov.check_availability():
                         file_corrupted = True
                         corrupted_chunks_count += 1
-                        stripe_issues.append({"stripe_index": 0, "state": "unrecoverable", "failures": 1})
+                        stripe_issues.append(
+                            {"stripe_index": 0, "state": "unrecoverable", "failures": 1}
+                        )
                     else:
                         try:
                             raw = prov.get_chunk(c["chunk_id"])
                             if hashlib.sha256(raw).hexdigest() != c["sha256"]:
                                 file_corrupted = True
                                 corrupted_chunks_count += 1
-                                stripe_issues.append({"stripe_index": 0, "state": "unrecoverable", "failures": 1})
+                                stripe_issues.append(
+                                    {"stripe_index": 0, "state": "unrecoverable", "failures": 1}
+                                )
                         except Exception:
                             file_corrupted = True
                             corrupted_chunks_count += 1
-                            stripe_issues.append({"stripe_index": 0, "state": "unrecoverable", "failures": 1})
+                            stripe_issues.append(
+                                {"stripe_index": 0, "state": "unrecoverable", "failures": 1}
+                            )
 
             overall_state = "corrupt" if file_corrupted else "healthy"
         else:
@@ -889,10 +993,18 @@ def verify_integrity(conn: sqlite3.Connection, file_id: str | None = None) -> di
 
                 if stripe_failures == 1:
                     file_degraded = True
-                    stripe_issues.append({"stripe_index": s_idx, "state": "rebuildable", "failures": 1})
+                    stripe_issues.append(
+                        {"stripe_index": s_idx, "state": "rebuildable", "failures": 1}
+                    )
                 elif stripe_failures >= 2:
                     file_corrupted = True
-                    stripe_issues.append({"stripe_index": s_idx, "state": "unrecoverable", "failures": stripe_failures})
+                    stripe_issues.append(
+                        {
+                            "stripe_index": s_idx,
+                            "state": "unrecoverable",
+                            "failures": stripe_failures,
+                        }
+                    )
 
             if file_corrupted:
                 overall_state = "corrupt"
@@ -901,12 +1013,14 @@ def verify_integrity(conn: sqlite3.Connection, file_id: str | None = None) -> di
             else:
                 overall_state = "healthy"
 
-        file_reports.append({
-            "file_id": f["id"],
-            "name": f["name"],
-            "state": overall_state,
-            "stripe_issues": stripe_issues,
-        })
+        file_reports.append(
+            {
+                "file_id": f["id"],
+                "name": f["name"],
+                "state": overall_state,
+                "stripe_issues": stripe_issues,
+            }
+        )
 
     overall_system = "healthy"
     if any(r["state"] == "corrupt" for r in file_reports):
@@ -925,7 +1039,7 @@ def verify_integrity(conn: sqlite3.Connection, file_id: str | None = None) -> di
 
 def heal_pool(conn: sqlite3.Connection, target_file_id: str | None = None) -> dict[str, Any]:
     """Rebuilds and regenerates missing or corrupted chunks across all drives or a specific file.
-    
+
     For parity files: XOR parity is used to regenerate missing chunks onto online drives.
     For mirrored files: the healthy replica is copied to restore the missing mirror copy.
     Returns a comprehensive heal report with pass/fail counts and list of restored chunks.
@@ -933,12 +1047,19 @@ def heal_pool(conn: sqlite3.Connection, target_file_id: str | None = None) -> di
     cursor = conn.cursor()
 
     if target_file_id:
-        cursor.execute("SELECT id, name, size, sha256, storage_mode FROM files WHERE id = ? AND status = 'complete'", (target_file_id,))
+        cursor.execute(
+            "SELECT id, name, size, sha256, storage_mode FROM files WHERE id = ? AND status = 'complete'",
+            (target_file_id,),
+        )
     else:
-        cursor.execute("SELECT id, name, size, sha256, storage_mode FROM files WHERE status = 'complete'")
+        cursor.execute(
+            "SELECT id, name, size, sha256, storage_mode FROM files WHERE status = 'complete'"
+        )
     files = cursor.fetchall()
 
-    cursor.execute("SELECT id, display_name, path, status, simulated_offline, provider_type, config FROM drives")
+    cursor.execute(
+        "SELECT id, display_name, path, status, simulated_offline, provider_type, config FROM drives"
+    )
     drive_cache = {d["id"]: d for d in cursor.fetchall()}
 
     files_checked = len(files)
@@ -989,7 +1110,9 @@ def heal_pool(conn: sqlite3.Connection, target_file_id: str | None = None) -> di
                                     raw_bytes = b
                             except Exception:
                                 is_ok = False
-                    chunk_status.append({"chunk": c, "drive": d_info, "is_ok": is_ok, "data": raw_bytes})
+                    chunk_status.append(
+                        {"chunk": c, "drive": d_info, "is_ok": is_ok, "data": raw_bytes}
+                    )
 
                 ok_chunks = [cs for cs in chunk_status if cs["is_ok"]]
                 bad_chunks = [cs for cs in chunk_status if not cs["is_ok"]]
@@ -1065,11 +1188,13 @@ def heal_pool(conn: sqlite3.Connection, target_file_id: str | None = None) -> di
             unrecoverable_files.append(f_name)
         elif file_rebuilt_count > 0:
             files_healed += 1
-            healed_files_details.append({
-                "file_id": f_id,
-                "name": f_name,
-                "chunks_rebuilt": file_rebuilt_count,
-            })
+            healed_files_details.append(
+                {
+                    "file_id": f_id,
+                    "name": f_name,
+                    "chunks_rebuilt": file_rebuilt_count,
+                }
+            )
 
     status = "healthy"
     if unrecoverable_files:
@@ -1098,7 +1223,9 @@ def reprotect_file(conn: sqlite3.Connection, file_id: str) -> dict[str, Any]:
     if not file_row:
         raise AppError(404, "FILE_NOT_FOUND", f"File '{file_id}' not found")
     if file_row["status"] != "complete":
-        raise AppError(400, "FILE_INCOMPLETE", f"File '{file_row['name']}' is not in complete status")
+        raise AppError(
+            400, "FILE_INCOMPLETE", f"File '{file_row['name']}' is not in complete status"
+        )
 
     # Read and decrypt the original file safely into memory
     meta, content = retrieve_file(conn, file_id)
@@ -1145,13 +1272,23 @@ def reprotect_file(conn: sqlite3.Connection, file_id: str) -> dict[str, Any]:
                     cid = uuid.uuid4().hex
                     d["provider"].put_chunk(cid, enc_payload)
                     written_chunks.append((d["provider"], cid))
-                    new_chunks_records.append((
-                        uuid.uuid4().hex, file_id, 0, pos, 0, d["id"], cid, chunk_hash, len(enc_payload)
-                    ))
+                    new_chunks_records.append(
+                        (
+                            uuid.uuid4().hex,
+                            file_id,
+                            0,
+                            pos,
+                            0,
+                            d["id"],
+                            cid,
+                            chunk_hash,
+                            len(enc_payload),
+                        )
+                    )
             else:
                 offset = 0
                 while offset < len(content):
-                    chunk_slice = content[offset:offset + settings.chunk_size_bytes]
+                    chunk_slice = content[offset : offset + settings.chunk_size_bytes]
                     offset += len(chunk_slice)
                     enc_payload = encrypt_chunk(chunk_slice, key)
                     stripe_drives = pick_placement_drives(available, 2, stripe_index)
@@ -1160,21 +1297,31 @@ def reprotect_file(conn: sqlite3.Connection, file_id: str) -> dict[str, Any]:
                         cid = uuid.uuid4().hex
                         d["provider"].put_chunk(cid, enc_payload)
                         written_chunks.append((d["provider"], cid))
-                        new_chunks_records.append((
-                            uuid.uuid4().hex, file_id, stripe_index, pos, 0, d["id"], cid, chunk_hash, len(enc_payload)
-                        ))
+                        new_chunks_records.append(
+                            (
+                                uuid.uuid4().hex,
+                                file_id,
+                                stripe_index,
+                                pos,
+                                0,
+                                d["id"],
+                                cid,
+                                chunk_hash,
+                                len(enc_payload),
+                            )
+                        )
                     stripe_index += 1
         elif new_mode == "chunked_parity":
             offset = 0
             while offset < len(content):
-                data0 = content[offset:offset + settings.chunk_size_bytes]
+                data0 = content[offset : offset + settings.chunk_size_bytes]
                 offset += len(data0)
                 if len(data0) < settings.chunk_size_bytes:
                     data1 = b""
                 else:
-                    data1 = content[offset:offset + settings.chunk_size_bytes]
+                    data1 = content[offset : offset + settings.chunk_size_bytes]
                     offset += len(data1)
-                
+
                 padded0 = data0.ljust(settings.chunk_size_bytes, b"\x00")
                 padded1 = data1.ljust(settings.chunk_size_bytes, b"\x00")
                 enc0 = encrypt_chunk(padded0, key)
@@ -1195,15 +1342,27 @@ def reprotect_file(conn: sqlite3.Connection, file_id: str) -> dict[str, Any]:
                     chash = hashlib.sha256(cbytes).hexdigest()
                     d["provider"].put_chunk(cid, cbytes)
                     written_chunks.append((d["provider"], cid))
-                    new_chunks_records.append((
-                        uuid.uuid4().hex, file_id, stripe_index, slot_pos, 1 if is_par else 0, d["id"], cid, chash, len(cbytes)
-                    ))
+                    new_chunks_records.append(
+                        (
+                            uuid.uuid4().hex,
+                            file_id,
+                            stripe_index,
+                            slot_pos,
+                            1 if is_par else 0,
+                            d["id"],
+                            cid,
+                            chash,
+                            len(cbytes),
+                        )
+                    )
                 stripe_index += 1
 
         # Delete old chunks from providers and DB
         cursor.execute("SELECT drive_id, chunk_id FROM chunks WHERE file_id = ?", (file_id,))
         old_chunks = cursor.fetchall()
-        cursor.execute("SELECT id, display_name, path, status, simulated_offline, provider_type, config FROM drives")
+        cursor.execute(
+            "SELECT id, display_name, path, status, simulated_offline, provider_type, config FROM drives"
+        )
         drive_cache = {d["id"]: d for d in cursor.fetchall()}
         for oc in old_chunks:
             d_info = drive_cache.get(oc["drive_id"])
@@ -1250,9 +1409,11 @@ def reprotect_file(conn: sqlite3.Connection, file_id: str) -> dict[str, Any]:
 def reprotect_all_files(conn: sqlite3.Connection) -> dict[str, Any]:
     """Finds all unprotected or single-drive files and upgrades them to mirrored or parity redundancy."""
     cursor = conn.cursor()
-    cursor.execute("SELECT id, name, storage_mode, protection_status FROM files WHERE status = 'complete'")
+    cursor.execute(
+        "SELECT id, name, storage_mode, protection_status FROM files WHERE status = 'complete'"
+    )
     all_files = cursor.fetchall()
-    
+
     reprotected = 0
     skipped = 0
     failed = 0
@@ -1268,7 +1429,14 @@ def reprotect_all_files(conn: sqlite3.Connection) -> dict[str, Any]:
             res = reprotect_file(conn, fid)
             if res.get("status") == "reprotected":
                 reprotected += 1
-                details.append({"id": fid, "name": f["name"], "result": "reprotected", "new_mode": res.get("new_mode")})
+                details.append(
+                    {
+                        "id": fid,
+                        "name": f["name"],
+                        "result": "reprotected",
+                        "new_mode": res.get("new_mode"),
+                    }
+                )
             else:
                 skipped += 1
         except Exception as e:

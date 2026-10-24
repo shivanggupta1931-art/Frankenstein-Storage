@@ -397,7 +397,7 @@ export const Dashboard: React.FC = () => {
       {/* Main Content Area */}
       <main style={{ flex: 1, display: "flex", flexDirection: "column" }}>
         {!unlocked ? (
-          <VaultLockScreen onUnlock={handleUnlock} />
+          <VaultLockScreen onUnlock={handleUnlock} onOpenSettings={() => setShowSettingsModal(true)} />
         ) : (
           <>
             {/* Pool Overview (Panel 1) */}

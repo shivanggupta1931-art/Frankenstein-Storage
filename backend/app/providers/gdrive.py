@@ -74,11 +74,26 @@ class GoogleDriveProvider(StorageProvider):
                 self.folder_name = matched_folder.name
             else:
                 matched_sub = None
-                fn_clean = self.folder_name.lower().replace(" ", "").replace("_", "").replace("-", "").replace("folder", "")
+                fn_clean = (
+                    self.folder_name.lower()
+                    .replace(" ", "")
+                    .replace("_", "")
+                    .replace("-", "")
+                    .replace("folder", "")
+                )
                 try:
                     for sub in local_gdrive.iterdir():
-                        sub_clean = sub.name.lower().replace(" ", "").replace("_", "").replace("-", "").replace("folder", "")
-                        if sub.is_dir() and (sub_clean == fn_clean or (fn_clean and (sub_clean in fn_clean or fn_clean in sub_clean))):
+                        sub_clean = (
+                            sub.name.lower()
+                            .replace(" ", "")
+                            .replace("_", "")
+                            .replace("-", "")
+                            .replace("folder", "")
+                        )
+                        if sub.is_dir() and (
+                            sub_clean == fn_clean
+                            or (fn_clean and (sub_clean in fn_clean or fn_clean in sub_clean))
+                        ):
                             matched_sub = sub
                             break
                 except Exception:
@@ -90,9 +105,16 @@ class GoogleDriveProvider(StorageProvider):
                     self.mock_dir = target_folder
                     self.folder_name = target_folder.name
                 except Exception:
-                    self.mock_dir = (Path.home() / ".frankenstein" / "gdrive_mock" / (self.folder_id or "default")).resolve()
+                    self.mock_dir = (
+                        Path.home()
+                        / ".frankenstein"
+                        / "gdrive_mock"
+                        / (self.folder_id or "default")
+                    ).resolve()
         else:
-            self.mock_dir = (Path.home() / ".frankenstein" / "gdrive_mock" / (self.folder_id or "default")).resolve()
+            self.mock_dir = (
+                Path.home() / ".frankenstein" / "gdrive_mock" / (self.folder_id or "default")
+            ).resolve()
 
         if self.auth_type == "demo_mock" and not self.simulated_offline:
             try:
@@ -113,6 +135,7 @@ class GoogleDriveProvider(StorageProvider):
         # Check extended attributes of directories in local_gdrive
         try:
             import subprocess
+
             for p in local_gdrive.iterdir():
                 if p.is_dir() and not p.name.startswith("."):
                     res = subprocess.run(
@@ -170,8 +193,16 @@ class GoogleDriveProvider(StorageProvider):
                     return cand
                 for sub in cand.iterdir():
                     if sub.is_dir():
-                        sub_norm = sub.name.lower().replace(" ", "").replace("_", "").replace("-", "").replace("folder", "")
-                        if fn_norm and (sub_norm == fn_norm or fn_norm in sub_norm or sub_norm in fn_norm):
+                        sub_norm = (
+                            sub.name.lower()
+                            .replace(" ", "")
+                            .replace("_", "")
+                            .replace("-", "")
+                            .replace("folder", "")
+                        )
+                        if fn_norm and (
+                            sub_norm == fn_norm or fn_norm in sub_norm or sub_norm in fn_norm
+                        ):
                             return cand
             except Exception:
                 pass
@@ -197,7 +228,11 @@ class GoogleDriveProvider(StorageProvider):
 
         if not self.refresh_token or not self.client_id or not self.client_secret:
             if not self.access_token:
-                raise AppError(401, "GDRIVE_UNAUTHORIZED", "Google Drive access token missing or expired without refresh token")
+                raise AppError(
+                    401,
+                    "GDRIVE_UNAUTHORIZED",
+                    "Google Drive access token missing or expired without refresh token",
+                )
             return
 
         try:
@@ -217,11 +252,17 @@ class GoogleDriveProvider(StorageProvider):
                     expires_in = data.get("expires_in", 3600)
                     self.token_expiry = now + expires_in
                 else:
-                    raise AppError(401, "GDRIVE_AUTH_FAILED", f"Failed to refresh Google Drive token: {res.text}")
+                    raise AppError(
+                        401,
+                        "GDRIVE_AUTH_FAILED",
+                        f"Failed to refresh Google Drive token: {res.text}",
+                    )
         except Exception as e:
             if isinstance(e, AppError):
                 raise e
-            raise AppError(503, "GDRIVE_UNAVAILABLE", f"Network error during Google Drive token refresh: {e}")
+            raise AppError(
+                503, "GDRIVE_UNAVAILABLE", f"Network error during Google Drive token refresh: {e}"
+            )
 
     def _get_headers(self) -> dict[str, str]:
         self._refresh_access_token_if_needed()
@@ -265,7 +306,7 @@ class GoogleDriveProvider(StorageProvider):
 
         # 0-config instant test mode reports 15 GiB standard cloud quota and local measured files
         if self.auth_type == "demo_mock":
-            limit = 15 * (1024 ** 3)  # 15 GiB
+            limit = 15 * (1024**3)  # 15 GiB
             measured = 0
             if self.mock_dir.exists():
                 try:
@@ -296,7 +337,11 @@ class GoogleDriveProvider(StorageProvider):
                     params={"fields": "storageQuota,user"},
                 )
                 if res.status_code != 200:
-                    raise AppError(503, "GDRIVE_API_ERROR", f"Failed to fetch Google Drive storage quota: {res.text}")
+                    raise AppError(
+                        503,
+                        "GDRIVE_API_ERROR",
+                        f"Failed to fetch Google Drive storage quota: {res.text}",
+                    )
 
                 data = res.json()
                 quota = data.get("storageQuota", {})
@@ -364,7 +409,11 @@ class GoogleDriveProvider(StorageProvider):
                 self.folder_id = create_res.json()["id"]
                 return self.folder_id
 
-            raise AppError(500, "GDRIVE_FOLDER_ERROR", f"Failed to create Google Drive vault folder: {create_res.text}")
+            raise AppError(
+                500,
+                "GDRIVE_FOLDER_ERROR",
+                f"Failed to create Google Drive vault folder: {create_res.text}",
+            )
 
     def _find_chunk_file_id(self, chunk_id: str) -> str | None:
         if chunk_id in self._chunk_cache:
@@ -410,7 +459,9 @@ class GoogleDriveProvider(StorageProvider):
                     pass
                 return
             except Exception as e:
-                raise AppError(500, "CHUNK_WRITE_FAILED", f"Failed to write chunk in direct link mode: {e}")
+                raise AppError(
+                    500, "CHUNK_WRITE_FAILED", f"Failed to write chunk in direct link mode: {e}"
+                )
 
         folder_id = self._ensure_vault_folder()
         headers = self._get_headers()
@@ -433,12 +484,16 @@ class GoogleDriveProvider(StorageProvider):
                     }
                     boundary = "FrankensteinUploadBoundary"
                     body = (
-                        f"--{boundary}\r\n"
-                        f"Content-Type: application/json; charset=UTF-8\r\n\r\n"
-                        f"{json.dumps(metadata)}\r\n"
-                        f"--{boundary}\r\n"
-                        f"Content-Type: application/octet-stream\r\n\r\n"
-                    ).encode() + data + f"\r\n--{boundary}--\r\n".encode()
+                        (
+                            f"--{boundary}\r\n"
+                            f"Content-Type: application/json; charset=UTF-8\r\n\r\n"
+                            f"{json.dumps(metadata)}\r\n"
+                            f"--{boundary}\r\n"
+                            f"Content-Type: application/octet-stream\r\n\r\n"
+                        ).encode()
+                        + data
+                        + f"\r\n--{boundary}--\r\n".encode()
+                    )
 
                     upload_res = client.post(
                         f"{GDRIVE_UPLOAD_BASE}/files?uploadType=multipart",
@@ -450,14 +505,20 @@ class GoogleDriveProvider(StorageProvider):
                     )
 
                 if upload_res.status_code not in (200, 201):
-                    raise AppError(500, "CHUNK_WRITE_FAILED", f"Google Drive failed to store chunk {chunk_id}: {upload_res.text}")
+                    raise AppError(
+                        500,
+                        "CHUNK_WRITE_FAILED",
+                        f"Google Drive failed to store chunk {chunk_id}: {upload_res.text}",
+                    )
 
                 uploaded_id = upload_res.json()["id"]
                 self._chunk_cache[chunk_id] = uploaded_id
         except Exception as e:
             if isinstance(e, AppError):
                 raise e
-            raise AppError(500, "CHUNK_WRITE_FAILED", f"Network error writing chunk to Google Drive: {e}")
+            raise AppError(
+                500, "CHUNK_WRITE_FAILED", f"Network error writing chunk to Google Drive: {e}"
+            )
 
     def get_chunk(self, chunk_id: str) -> bytes:
         if not self.check_availability():
@@ -467,12 +528,16 @@ class GoogleDriveProvider(StorageProvider):
         if self.auth_type == "demo_mock":
             chunk_file = self.mock_dir / chunk_id
             if not chunk_file.exists():
-                raise AppError(404, "CHUNK_NOT_FOUND", f"Chunk {chunk_id} not found in direct link store")
+                raise AppError(
+                    404, "CHUNK_NOT_FOUND", f"Chunk {chunk_id} not found in direct link store"
+                )
             return chunk_file.read_bytes()
 
         file_id = self._find_chunk_file_id(chunk_id)
         if not file_id:
-            raise AppError(404, "CHUNK_NOT_FOUND", f"Chunk {chunk_id} not found in Google Drive folder")
+            raise AppError(
+                404, "CHUNK_NOT_FOUND", f"Chunk {chunk_id} not found in Google Drive folder"
+            )
 
         headers = self._get_headers()
         try:
@@ -486,13 +551,21 @@ class GoogleDriveProvider(StorageProvider):
                     return res.content
                 elif res.status_code == 404:
                     self._chunk_cache.pop(chunk_id, None)
-                    raise AppError(404, "CHUNK_NOT_FOUND", f"Chunk {chunk_id} not found on Google Drive")
+                    raise AppError(
+                        404, "CHUNK_NOT_FOUND", f"Chunk {chunk_id} not found on Google Drive"
+                    )
                 else:
-                    raise AppError(500, "CHUNK_READ_FAILED", f"Google Drive read failed for chunk {chunk_id}: {res.text}")
+                    raise AppError(
+                        500,
+                        "CHUNK_READ_FAILED",
+                        f"Google Drive read failed for chunk {chunk_id}: {res.text}",
+                    )
         except Exception as e:
             if isinstance(e, AppError):
                 raise e
-            raise AppError(500, "CHUNK_READ_FAILED", f"Network error reading chunk from Google Drive: {e}")
+            raise AppError(
+                500, "CHUNK_READ_FAILED", f"Network error reading chunk from Google Drive: {e}"
+            )
 
     def delete_chunk(self, chunk_id: str) -> bool:
         if not self.check_availability():

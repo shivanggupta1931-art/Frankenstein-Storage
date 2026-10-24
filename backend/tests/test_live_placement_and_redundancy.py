@@ -1,19 +1,21 @@
 import io
 import os
+
 import pytest
+
 from backend.app.core.config import settings
 from backend.app.services.drive_service import (
+    calculate_pooled_overview,
     list_drives,
     patch_drive,
-    calculate_pooled_overview,
 )
 from backend.app.services.storage_engine import (
     download_stream,
-    upload_stream,
     get_file_chunks_map,
     reprotect_file,
-    reprotect_all_files,
+    upload_stream,
 )
+
 
 @pytest.mark.asyncio
 async def test_full_placement_and_redundancy_suite(test_env):
@@ -26,10 +28,7 @@ async def test_full_placement_and_redundancy_suite(test_env):
     # 1.25 MiB payload
     large_data = os.urandom(1024 * 1024 + 256 * 1024)
     file_large = await upload_stream(
-        conn,
-        stream=io.BytesIO(large_data),
-        filename="large_video.mp4",
-        mode="auto"
+        conn, stream=io.BytesIO(large_data), filename="large_video.mp4", mode="auto"
     )
     assert file_large["protection_status"] == "parity"
     assert file_large["protection_label"] == "Parity-protected"
@@ -42,10 +41,12 @@ async def test_full_placement_and_redundancy_suite(test_env):
     stripes = {}
     for c in chunks:
         stripes.setdefault(c["stripe_index"], []).append(c)
-    
+
     for s_idx, s_chunks in stripes.items():
         d_ids = [c["drive_id"] for c in s_chunks]
-        assert len(d_ids) == len(set(d_ids)), f"Stripe {s_idx} chunks must be on distinct drives: {d_ids}"
+        assert len(d_ids) == len(set(d_ids)), (
+            f"Stripe {s_idx} chunks must be on distinct drives: {d_ids}"
+        )
         parity_chunks = [c for c in s_chunks if c["is_parity"]]
         data_chunks = [c for c in s_chunks if not c["is_parity"]]
         for p in parity_chunks:
@@ -60,16 +61,15 @@ async def test_full_placement_and_redundancy_suite(test_env):
     # --- TEST 2: Small File (< 1 MiB) with 3 drives -> Mirrored across 2 distinct drives
     small_data = b"Small file content with high value" * 50
     file_small = await upload_stream(
-        conn,
-        stream=io.BytesIO(small_data),
-        filename="notes.txt",
-        mode="auto"
+        conn, stream=io.BytesIO(small_data), filename="notes.txt", mode="auto"
     )
     assert file_small["protection_status"] == "mirrored"
     assert file_small["protection_label"] == "Mirrored (2x)"
     sm_chunks = get_file_chunks_map(conn, file_small["id"])
     assert len(sm_chunks) == 2, "Small file with 2+ drives must have 2 mirrored copies"
-    assert sm_chunks[0]["drive_id"] != sm_chunks[1]["drive_id"], "Mirrored copies must be on distinct drives"
+    assert sm_chunks[0]["drive_id"] != sm_chunks[1]["drive_id"], (
+        "Mirrored copies must be on distinct drives"
+    )
 
     # Download small file
     _, dl_sm_stream, sm_rebuilt = download_stream(conn, file_small["id"])
@@ -83,7 +83,7 @@ async def test_full_placement_and_redundancy_suite(test_env):
         conn,
         stream=io.BytesIO(b"Document content under 2 drives pool" * 100),
         filename="two_drives_document.pdf",
-        mode="auto"
+        mode="auto",
     )
     assert file_2d["protection_status"] == "mirrored"
     assert file_2d["protection_label"] == "Mirrored (2x)"
@@ -95,7 +95,9 @@ async def test_full_placement_and_redundancy_suite(test_env):
     patch_drive(conn, drive1["id"], simulated_offline=True)
     _, dl_survived, ctx_2d = download_stream(conn, file_2d["id"])
     assert b"".join(dl_survived) == b"Document content under 2 drives pool" * 100
-    assert ctx_2d["was_rebuilt"] is True, "Should have been retrieved from mirror replica with was_rebuilt=True"
+    assert ctx_2d["was_rebuilt"] is True, (
+        "Should have been retrieved from mirror replica with was_rebuilt=True"
+    )
 
     # Bring drives back online
     patch_drive(conn, drive1["id"], simulated_offline=False)
@@ -120,10 +122,7 @@ async def test_full_placement_and_redundancy_suite(test_env):
     patch_drive(conn, drive2["id"], simulated_offline=True)
     patch_drive(conn, drive3["id"], simulated_offline=True)
     file_unprot = await upload_stream(
-        conn,
-        stream=io.BytesIO(unprot_data),
-        filename="single_drive.dat",
-        mode="whole"
+        conn, stream=io.BytesIO(unprot_data), filename="single_drive.dat", mode="whole"
     )
     assert file_unprot["protection_status"] == "unprotected"
     assert "Only 1 drive available" in file_unprot["unprotected_reason"]

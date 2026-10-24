@@ -18,6 +18,7 @@ def mock_gdrive_http():
 
     def mock_send(request, **kw):
         import urllib.parse
+
         url = urllib.parse.unquote(str(request.url))
         method = request.method
 
@@ -25,7 +26,11 @@ def mock_gdrive_http():
             return Response(
                 200,
                 json={
-                    "storageQuota": {"limit": "107374182400", "usage": "1073741824", "usageInDrive": "536870912"},
+                    "storageQuota": {
+                        "limit": "107374182400",
+                        "usage": "1073741824",
+                        "usageInDrive": "536870912",
+                    },
                     "user": {"emailAddress": "testuser@iitr.ac.in"},
                 },
             )
@@ -38,18 +43,24 @@ def mock_gdrive_http():
             for i, line in enumerate(lines):
                 if line.startswith(b"{") and line.endswith(b"}"):
                     import json
+
                     meta_json = json.loads(line.decode())
                     break
 
             chunk_id = meta_json.get("name", "chunk1")
             # Raw data is between headers and closing boundary
-            data_start = content.find(b"\r\n\r\n", content.find(b"Content-Type: application/octet-stream")) + 4
+            data_start = (
+                content.find(b"\r\n\r\n", content.find(b"Content-Type: application/octet-stream"))
+                + 4
+            )
             data_end = content.rfind(b"\r\n--FrankensteinUploadBoundary--")
             chunk_data = content[data_start:data_end]
             storage_chunks[chunk_id] = chunk_data
             return Response(200, json={"id": f"file-{chunk_id}", "name": chunk_id})
 
-        is_media = "alt=media" in url or (hasattr(request, "params") and getattr(request, "params", {}).get("alt") == "media")
+        is_media = "alt=media" in url or (
+            hasattr(request, "params") and getattr(request, "params", {}).get("alt") == "media"
+        )
         if "drive/v3/files" in url and method == "GET":
             if is_media:
                 file_id = url.split("/files/")[1].split("?")[0]
@@ -61,7 +72,10 @@ def mock_gdrive_http():
             if "q=" in url:
                 # Query file or folder
                 if "mimeType = 'application/vnd.google-apps.folder'" in url:
-                    return Response(200, json={"files": [{"id": "vault-folder-123", "name": "FrankensteinVault"}]})
+                    return Response(
+                        200,
+                        json={"files": [{"id": "vault-folder-123", "name": "FrankensteinVault"}]},
+                    )
                 # Search chunk
                 for cid in storage_chunks:
                     if f"name = '{cid}'" in url:
@@ -209,7 +223,9 @@ def test_gdrive_provider_resolves_local_folder_by_id_and_migrates_chunks(tmp_pat
     (old_custom_folder / "testchunk1").write_bytes(b"chunk-data-1")
 
     with patch.object(GoogleDriveProvider, "_detect_local_gdrive_desktop", return_value=local_cs):
-        with patch.object(GoogleDriveProvider, "_find_folder_by_gdrive_id", return_value=real_target_folder):
+        with patch.object(
+            GoogleDriveProvider, "_find_folder_by_gdrive_id", return_value=real_target_folder
+        ):
             provider = GoogleDriveProvider(
                 config={
                     "folder_id": "target_folder_id_xyz",
@@ -221,4 +237,3 @@ def test_gdrive_provider_resolves_local_folder_by_id_and_migrates_chunks(tmp_pat
             assert (real_target_folder / "testchunk1").exists()
             assert (real_target_folder / "testchunk1").read_bytes() == b"chunk-data-1"
             assert not (old_custom_folder / "testchunk1").exists()
-

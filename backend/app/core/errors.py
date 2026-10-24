@@ -26,7 +26,9 @@ class AppError(Exception):
         self.details = details or {}
 
 
-def format_error_response(status_code: int, code: str, message: str, details: Any | None = None) -> JSONResponse:
+def format_error_response(
+    status_code: int, code: str, message: str, details: Any | None = None
+) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
         content={

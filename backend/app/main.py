@@ -6,7 +6,9 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
+from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.responses import FileResponse, HTMLResponse, Response
 
 from backend.app.api.endpoints import router
 from backend.app.core.config import settings
@@ -63,8 +65,59 @@ app.add_exception_handler(RequestValidationError, validation_error_handler)
 # Security and Auth middleware
 app.add_middleware(SecurityMiddleware)
 
-# Include API endpoints
+# Include API endpoints first
 app.include_router(router)
+
+# Mount Vite static assets if present
+index_file = settings.static_dir / "index.html"
+assets_dir = settings.static_dir / "assets"
+
+if assets_dir.exists():
+    app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+
+def get_injected_index_html() -> str:
+    if not index_file.exists():
+        return ""
+    raw = index_file.read_text(encoding="utf-8")
+    injection = f"""<script>
+      window.__FRANKENSTEIN_SESSION_TOKEN__ = "{settings.session_token}";
+    </script>
+  </head>"""
+    if "</head>" in raw:
+        return raw.replace("</head>", injection, 1)
+    return raw
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def serve_spa_or_static(full_path: str = ""):
+    # If path starts with api/, return 404 to avoid masking API 404s with HTML
+    if full_path.startswith("api/"):
+        return Response(status_code=404)
+
+    # Check if a direct static file exists in static_dir (e.g. favicon.ico, vite.svg)
+    if settings.static_dir.exists():
+        if full_path:
+            candidate = (settings.static_dir / full_path).resolve()
+            try:
+                candidate.relative_to(settings.static_dir.resolve())
+                if candidate.is_file():
+                    return FileResponse(candidate)
+            except ValueError:
+                pass
+
+        # Otherwise serve SPA index.html with auto-injected session token
+        if index_file.exists():
+            return HTMLResponse(content=get_injected_index_html())
+
+    # Fallback if no static_dir built
+    return {
+        "name": "Frankenstein Storage",
+        "status": "running",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "health": "/api/v1/health",
+    }
 
 
 def run():

@@ -20,7 +20,7 @@ def test_env(tmp_path: Path):
     """Sets up an isolated test environment with temporary database and 3 drives."""
     db_file = tmp_path / "test_frankenstein.db"
     settings.database_path = db_file
-    
+
     # Configure 64KB chunk size for faster tests (or default 1MB)
     orig_chunk_size = settings.chunk_size_bytes
     settings.chunk_size_bytes = 64 * 1024  # 64 KB chunks for snappy test execution
@@ -79,5 +79,7 @@ async def async_client(test_env):
         "Host": "127.0.0.1:8765",
         "Origin": "http://127.0.0.1:5173",
     }
-    async with AsyncClient(transport=transport, base_url="http://127.0.0.1:8765", headers=headers) as client:
+    async with AsyncClient(
+        transport=transport, base_url="http://127.0.0.1:8765", headers=headers
+    ) as client:
         yield client
