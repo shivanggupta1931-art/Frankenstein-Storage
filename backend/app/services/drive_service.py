@@ -335,19 +335,29 @@ def get_macos_storage_locations() -> list[dict[str, Any]]:
                         c_usage = shutil.disk_usage(item)
                         is_gdrive = "googledrive" in item.name.lower()
                         my_drive = item / "My Drive"
-                        target_dir = my_drive if my_drive.exists() else item
-                        sample_dir = target_dir / "sample"
-                        final_dir = sample_dir if sample_dir.exists() else (target_dir / "FrankensteinStorage")
+                        existing_target = None
+                        if my_drive.exists():
+                            try:
+                                for sub in my_drive.iterdir():
+                                    if sub.is_dir() and not sub.name.startswith("."):
+                                        if any(k in sub.name.lower() for k in ("sample", "frankenstein", "shukla", "vault", "storage")):
+                                            existing_target = sub
+                                            break
+                            except Exception:
+                                pass
+
+                        final_dir = existing_target if existing_target else (my_drive / "FrankensteinStorage" if my_drive.exists() else item)
                         gdrive_quota = 15 * (1024 ** 3) if is_gdrive else c_usage.total
+                        email_hint = item.name.replace("GoogleDrive-", "") if is_gdrive else item.name
                         locations.append({
-                            "name": f"Google Drive (Desktop Synced: {item.name})" if is_gdrive else f"Cloud Storage: {item.name}",
+                            "name": f"Google Drive ({email_hint})" if is_gdrive else f"Cloud Storage: {item.name}",
                             "path": str(final_dir),
                             "total": gdrive_quota,
                             "free": gdrive_quota if is_gdrive else c_usage.free,
                             "used": 0 if is_gdrive else c_usage.used,
                             "is_external": False,
                             "is_cloud_synced": True,
-                            "description": "Auto-syncs to 15 GiB Google Drive cloud in real-time" if is_gdrive else f"Synced cloud folder via {item.name}",
+                            "description": f"Auto-syncs chunks directly to {email_hint} in real-time" if is_gdrive else f"Synced cloud folder via {item.name}",
                         })
                     except Exception:
                         pass

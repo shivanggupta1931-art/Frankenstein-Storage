@@ -196,3 +196,29 @@ async def test_add_gdrive_via_http_api(test_env, mock_gdrive_http):
         drive_data = res.json()
         assert drive_data["display_name"] == "IITR Cloud Vault"
         assert drive_data["provider_type"] == "gdrive"
+
+
+def test_gdrive_provider_resolves_local_folder_by_id_and_migrates_chunks(tmp_path):
+    local_cs = tmp_path / "CloudStorage" / "GoogleDrive-user@gmail.com" / "My Drive"
+    local_cs.mkdir(parents=True)
+    real_target_folder = local_cs / "real_synced_folder_123"
+    real_target_folder.mkdir()
+
+    old_custom_folder = local_cs / "CustomFolderName"
+    old_custom_folder.mkdir()
+    (old_custom_folder / "testchunk1").write_bytes(b"chunk-data-1")
+
+    with patch.object(GoogleDriveProvider, "_detect_local_gdrive_desktop", return_value=local_cs):
+        with patch.object(GoogleDriveProvider, "_find_folder_by_gdrive_id", return_value=real_target_folder):
+            provider = GoogleDriveProvider(
+                config={
+                    "folder_id": "target_folder_id_xyz",
+                    "folder_name": "CustomFolderName",
+                    "auth_type": "demo_mock",
+                }
+            )
+            assert provider.mock_dir == real_target_folder
+            assert (real_target_folder / "testchunk1").exists()
+            assert (real_target_folder / "testchunk1").read_bytes() == b"chunk-data-1"
+            assert not (old_custom_folder / "testchunk1").exists()
+

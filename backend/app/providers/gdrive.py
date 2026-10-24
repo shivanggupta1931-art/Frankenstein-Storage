@@ -55,12 +55,42 @@ class GoogleDriveProvider(StorageProvider):
         # Local storage directory for direct link / desktop auto-sync
         local_gdrive = self._detect_local_gdrive_desktop()
         if local_gdrive:
-            target_folder = local_gdrive / self.folder_name
-            try:
-                target_folder.mkdir(parents=True, exist_ok=True)
-                self.mock_dir = target_folder
-            except Exception:
-                self.mock_dir = (Path.home() / ".frankenstein" / "gdrive_mock" / (self.folder_id or "default")).resolve()
+            matched_folder = self._find_folder_by_gdrive_id(local_gdrive, self.folder_id)
+            if matched_folder:
+                self.mock_dir = matched_folder
+                # Migrate chunks from older custom-named folder if one existed
+                old_folder = local_gdrive / self.folder_name
+                if old_folder.exists() and old_folder.is_dir() and old_folder != matched_folder:
+                    try:
+                        for chunk_file in old_folder.glob("*"):
+                            if chunk_file.is_file() and not chunk_file.name.startswith("."):
+                                dest = matched_folder / chunk_file.name
+                                if not dest.exists():
+                                    chunk_file.rename(dest)
+                        if not any(old_folder.iterdir()):
+                            old_folder.rmdir()
+                    except Exception:
+                        pass
+                self.folder_name = matched_folder.name
+            else:
+                matched_sub = None
+                fn_clean = self.folder_name.lower().replace(" ", "").replace("_", "").replace("-", "").replace("folder", "")
+                try:
+                    for sub in local_gdrive.iterdir():
+                        sub_clean = sub.name.lower().replace(" ", "").replace("_", "").replace("-", "").replace("folder", "")
+                        if sub.is_dir() and (sub_clean == fn_clean or (fn_clean and (sub_clean in fn_clean or fn_clean in sub_clean))):
+                            matched_sub = sub
+                            break
+                except Exception:
+                    pass
+
+                target_folder = matched_sub if matched_sub else (local_gdrive / self.folder_name)
+                try:
+                    target_folder.mkdir(parents=True, exist_ok=True)
+                    self.mock_dir = target_folder
+                    self.folder_name = target_folder.name
+                except Exception:
+                    self.mock_dir = (Path.home() / ".frankenstein" / "gdrive_mock" / (self.folder_id or "default")).resolve()
         else:
             self.mock_dir = (Path.home() / ".frankenstein" / "gdrive_mock" / (self.folder_id or "default")).resolve()
 
@@ -70,16 +100,44 @@ class GoogleDriveProvider(StorageProvider):
             except Exception:
                 pass
 
+    def _find_folder_by_gdrive_id(self, local_gdrive: Path, folder_id: str | None) -> Path | None:
+        """Finds the local synced directory that corresponds to the given Google Drive folder ID."""
+        if not folder_id or not local_gdrive.exists():
+            return None
+
+        # Check direct named match first
+        direct_match = local_gdrive / folder_id
+        if direct_match.is_dir():
+            return direct_match
+
+        # Check extended attributes of directories in local_gdrive
+        try:
+            import subprocess
+            for p in local_gdrive.iterdir():
+                if p.is_dir() and not p.name.startswith("."):
+                    res = subprocess.run(
+                        ["xattr", "-p", "com.google.drivefs.item-id#S", str(p)],
+                        capture_output=True,
+                        text=True,
+                        timeout=1.0,
+                    )
+                    if res.returncode == 0 and folder_id == res.stdout.strip():
+                        return p
+        except Exception:
+            pass
+        return None
+
     def _detect_local_gdrive_desktop(self) -> Path | None:
-        """Detects if Google Drive for Desktop is installed locally on macOS."""
+        """Detects Google Drive for Desktop directories on macOS, choosing the right account."""
         home = Path.home()
+        candidates: list[Path] = []
         cs = home / "Library" / "CloudStorage"
         if cs.exists():
             try:
                 for item in cs.iterdir():
                     if item.is_dir() and "googledrive" in item.name.lower():
                         my_drive = item / "My Drive"
-                        return my_drive if my_drive.exists() else item
+                        candidates.append(my_drive if my_drive.exists() else item)
             except Exception:
                 pass
         vols = Path("/Volumes")
@@ -88,10 +146,48 @@ class GoogleDriveProvider(StorageProvider):
                 for item in vols.iterdir():
                     if "googledrive" in item.name.lower() or "google drive" in item.name.lower():
                         my_drive = item / "My Drive"
-                        return my_drive if my_drive.exists() else item
+                        candidates.append(my_drive if my_drive.exists() else item)
             except Exception:
                 pass
-        return None
+
+        if not candidates:
+            return None
+
+        fn = (self.folder_name or "").lower()
+        cfg_str = str(self.config).lower()
+
+        # Prioritize account candidate matching email hint in folder name or config
+        if "9796" in fn or "9796" in cfg_str:
+            candidates.sort(key=lambda c: 0 if "9796" in str(c).lower() else 1)
+        elif "1931" in fn or "1931" in cfg_str:
+            candidates.sort(key=lambda c: 0 if "1931" in str(c).lower() else 1)
+
+        # 1. Match based on folder existence in candidates (checking prioritized candidate first)
+        fn_norm = fn.replace(" ", "").replace("_", "").replace("-", "").replace("folder", "")
+        for cand in candidates:
+            try:
+                if (cand / self.folder_name).exists():
+                    return cand
+                for sub in cand.iterdir():
+                    if sub.is_dir():
+                        sub_norm = sub.name.lower().replace(" ", "").replace("_", "").replace("-", "").replace("folder", "")
+                        if fn_norm and (sub_norm == fn_norm or fn_norm in sub_norm or sub_norm in fn_norm):
+                            return cand
+            except Exception:
+                pass
+
+        # 2. Match based on account name/hints in folder_name or config
+        for cand in candidates:
+            cand_name = cand.parent.name.lower() if cand.name == "My Drive" else cand.name.lower()
+            if "9796" in fn or "9796" in cfg_str:
+                if "9796" in cand_name:
+                    return cand
+            if "1931" in fn or "1931" in cfg_str:
+                if "1931" in cand_name:
+                    return cand
+
+        # 3. Default to first candidate
+        return candidates[0]
 
     def _refresh_access_token_if_needed(self) -> None:
         now = time.time()
@@ -303,8 +399,15 @@ class GoogleDriveProvider(StorageProvider):
             chunk_file = self.mock_dir / chunk_id
             tmp_file = self.mock_dir / f"{chunk_id}.tmp"
             try:
-                tmp_file.write_bytes(data)
+                with open(tmp_file, "wb") as f:
+                    f.write(data)
+                    f.flush()
+                    os.fsync(f.fileno())
                 tmp_file.replace(chunk_file)
+                try:
+                    os.chmod(chunk_file, 0o644)
+                except Exception:
+                    pass
                 return
             except Exception as e:
                 raise AppError(500, "CHUNK_WRITE_FAILED", f"Failed to write chunk in direct link mode: {e}")

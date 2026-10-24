@@ -104,6 +104,26 @@ async def test_host_and_origin_validation(test_env):
         data = res.json()
         assert data["error"]["code"] == "FORBIDDEN"
 
+    # Dynamic loopback origin on fallback port 5174 (e.g. Vite fallback port)
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://127.0.0.1:8765",
+        headers={**valid_token_header, "Host": "127.0.0.1:8765", "Origin": "http://127.0.0.1:5174"},
+    ) as client:
+        res = await client.get("/api/v1/overview")
+        assert res.status_code == 200
+        assert res.headers.get("Access-Control-Allow-Origin") == "http://127.0.0.1:5174"
+
+    # Preflight OPTIONS for port 5174
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://127.0.0.1:8765",
+        headers={"Host": "127.0.0.1:8765", "Origin": "http://127.0.0.1:5174"},
+    ) as client:
+        res = await client.options("/api/v1/overview")
+        assert res.status_code == 204
+        assert res.headers.get("Access-Control-Allow-Origin") == "http://127.0.0.1:5174"
+
 
 @pytest.mark.asyncio
 async def test_api_upload_download_http_flow(async_client):
