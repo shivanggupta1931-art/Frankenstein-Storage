@@ -3,6 +3,7 @@
 <div align="center">
 
 ![Frankenstein Storage](https://img.shields.io/badge/Frankenstein-Storage_v1.0.0-8b5cf6?style=for-the-badge&logo=ghost)
+[![Live Site](https://img.shields.io/badge/Live_Site-Vercel-black?style=for-the-badge&logo=vercel)](https://zippy-pumice-qfzzlv8.tmp.now)
 [![CI Pipeline](https://img.shields.io/github/actions/workflow/status/shivanggupta1931/Frankenstein-Storage/ci.yml?branch=main&label=CI&style=for-the-badge&logo=githubactions)](https://github.com/shivanggupta1931/Frankenstein-Storage/actions)
 [![Docker Image](https://img.shields.io/badge/ghcr.io-frankenstein--storage-blue?style=for-the-badge&logo=docker)](https://github.com/shivanggupta1931/Frankenstein-Storage/pkgs/container/frankenstein-storage)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-3776AB?style=for-the-badge&logo=python)](https://python.org)
@@ -12,7 +13,7 @@
 
 **Turn fragmented drives, external USB pendrives, and free cloud tiers into one unified, self-healing, encrypted storage mesh.**
 
-[Quickstart](#-quickstart) • [1-Line Installer](#-1-line-terminal-installer-macos--linux) • [Docker Distribution](#-1-click-docker-distribution) • [Cloud Deployment](#-cloud-1-click-deployment) • [Architecture](#-architecture--storage-engine) • [REST API](#-rest-api-reference)
+[🌐 Live Site (Vercel)](https://zippy-pumice-qfzzlv8.tmp.now) • [Quickstart](#-quickstart) • [1-Line Installer](#-1-line-terminal-installer-macos--linux) • [Docker Distribution](#-1-click-docker-distribution) • [Cloud Deployment](#-cloud-1-click-deployment) • [Architecture](#-architecture--storage-engine) • [REST API](#-rest-api-reference)
 
 </div>
 
@@ -31,6 +32,21 @@
 ---
 
 ## 🚀 Quickstart
+
+### 🌐 Live Web Deployment (Vercel)
+
+Frankenstein Storage is deployed and live on Vercel:
+
+👉 **[Open Live Site on Vercel](https://zippy-pumice-qfzzlv8.tmp.now)**
+
+| Resource | URL / Value |
+| :--- | :--- |
+| **Production Domain** | [`https://zippy-pumice-qfzzlv8.tmp.now`](https://zippy-pumice-qfzzlv8.tmp.now) |
+| **Preview Deployment** | [`https://zippy-pumice-qfzzlv8-kjlcvukf4-founders23.vercel.app`](https://zippy-pumice-qfzzlv8-kjlcvukf4-founders23.vercel.app) |
+| **Default Master Password** | `iitr@123` |
+| **Session Bearer Token** | `frankenstein-demo-token` |
+
+---
 
 ### 📦 1-Line Terminal Installer (macOS & Linux)
 
@@ -94,6 +110,7 @@ Frankenstein Storage can be deployed to your favorite cloud container provider w
 
 | Provider | Configuration File | Guide |
 | :--- | :--- | :--- |
+| **Vercel** | [`vercel.json`](vercel.json) | [Live Production Link](https://zippy-pumice-qfzzlv8.tmp.now) with Serverless API routing |
 | **Render** | [`render.yaml`](render.yaml) | 1-click Docker web service with persistent 10GB disk mount at `/data` |
 | **Railway** | [`railway.json`](railway.json) | Instant deploy with automatic restart policy and `/api/v1/health` checks |
 
