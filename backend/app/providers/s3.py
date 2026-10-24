@@ -324,3 +324,17 @@ class S3StorageProvider(StorageProvider):
             "is_external": False,
             "is_removable": False,
         }
+
+    def cleanup_temp_files(self) -> int:
+        """Cleans temporary files created during chunk operations (for mock storage)."""
+        count = 0
+        if self.is_mock and hasattr(self, "mock_dir") and self.mock_dir.exists():
+            tmp_dir = self.mock_dir.parent / "tmp"
+            if tmp_dir.exists():
+                for f in tmp_dir.glob("*"):
+                    try:
+                        f.unlink()
+                        count += 1
+                    except OSError:
+                        pass
+        return count

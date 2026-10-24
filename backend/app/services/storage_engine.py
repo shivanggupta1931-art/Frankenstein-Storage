@@ -104,7 +104,8 @@ def startup_cleanup(conn: sqlite3.Connection) -> None:
     cursor.execute("SELECT id, display_name, path, status, simulated_offline, provider_type, config FROM drives")
     for d in cursor.fetchall():
         prov = get_drive_provider(d)
-        prov.cleanup_temp_files()
+        if hasattr(prov, "cleanup_temp_files"):
+            prov.cleanup_temp_files()
     
     conn.commit()
 

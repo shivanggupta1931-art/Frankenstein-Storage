@@ -6,6 +6,7 @@ import { FilesPanel } from "../components/FilesPanel";
 import { FileDetailsDrawer } from "../components/FileDetailsDrawer";
 import { FilePreviewModal } from "../components/FilePreviewModal";
 import { UnlockModal } from "../components/UnlockModal";
+import { VaultLockScreen } from "../components/VaultLockScreen";
 import { SettingsModal } from "../components/SettingsModal";
 import { ActivityModal } from "../components/ActivityModal";
 import { UploadDecisionModal, StorageMode } from "../components/UploadDecisionModal";
@@ -73,15 +74,12 @@ export const Dashboard: React.FC = () => {
       setUnlocked(health.unlocked);
 
       if (!health.unlocked) {
-        // Vault is locked: load overview only if possible, or show unlock modal
-        try {
-          const ov = await api.getOverview();
-          setOverview(ov);
-          const dr = await api.getDrives();
-          setDrives(dr);
-        } catch {
-          // unauthed or locked
-        }
+        // Vault is locked: purge all data from UI memory immediately
+        setOverview(null);
+        setDrives([]);
+        setFiles([]);
+        setSelectedFile(null);
+        setPreviewFile(null);
         return;
       }
 
@@ -139,9 +137,19 @@ export const Dashboard: React.FC = () => {
   };
 
   const handleLock = async () => {
-    await api.lock();
+    try {
+      await api.lock();
+    } catch {}
     setUnlocked(false);
-    addToast("info", "Storage vault locked");
+    setOverview(null);
+    setDrives([]);
+    setFiles([]);
+    setSelectedFile(null);
+    setPreviewFile(null);
+    setShowUnlockModal(false);
+    setShowActivityModal(false);
+    setShowSettingsModal(false);
+    addToast("info", "Dashboard locked. Encryption keys purged from memory.");
     await refreshData();
   };
 
@@ -388,138 +396,143 @@ export const Dashboard: React.FC = () => {
 
       {/* Main Content Area */}
       <main style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-        {/* Pool Overview (Panel 1) */}
-        <PoolOverview overview={overview} loading={loading} />
+        {!unlocked ? (
+          <VaultLockScreen onUnlock={handleUnlock} />
+        ) : (
+          <>
+            {/* Pool Overview (Panel 1) */}
+            <PoolOverview overview={overview} loading={loading} />
 
-        {/* Degraded Mode Banner */}
-        {unlocked &&
-          (drives.some((d) => d.simulated_offline || !d.available) ||
-            files.some((f) => f.health?.includes("Degraded"))) && (
-            <div
-              className="animate-slide-up"
-              style={{
-                margin: "0 28px 20px",
-                padding: "14px 20px",
-                backgroundColor: "rgba(245, 158, 11, 0.12)",
-                border: "1px solid rgba(245, 158, 11, 0.4)",
-                borderRadius: "var(--radius-md)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                flexWrap: "wrap",
-                gap: "14px",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                <AlertTriangle size={22} color="#f59e0b" style={{ flexShrink: 0 }} />
-                <div>
-                  <div style={{ fontSize: "13px", fontWeight: "700", color: "#f59e0b" }}>
-                    Storage Pool Degraded (Drive Disconnected / Offline)
-                  </div>
-                  <div style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "2px" }}>
-                    Redundancy is reduced, but files remain downloadable and previewable by reconstructing missing chunks from XOR parity or mirror replicas.
-                  </div>
-                </div>
-              </div>
-
-              <button
-                className="btn-interactive"
-                onClick={handleHealPool}
-                disabled={healing}
+            {/* Degraded Mode Banner */}
+            {(drives.some((d) => d.simulated_offline || !d.available) ||
+              files.some((f) => f.health?.includes("Degraded"))) && (
+              <div
+                className="animate-slide-up"
                 style={{
+                  margin: "0 28px 20px",
+                  padding: "14px 20px",
+                  backgroundColor: "rgba(245, 158, 11, 0.12)",
+                  border: "1px solid rgba(245, 158, 11, 0.4)",
+                  borderRadius: "var(--radius-md)",
                   display: "flex",
                   alignItems: "center",
-                  gap: "6px",
-                  padding: "8px 18px",
-                  backgroundColor: "#f59e0b",
-                  color: "#ffffff",
-                  fontWeight: "700",
-                  fontSize: "12px",
-                  borderRadius: "var(--radius-sm)",
-                  border: "none",
-                  cursor: healing ? "not-allowed" : "pointer",
-                  opacity: healing ? 0.7 : 1,
-                  boxShadow: "0 2px 4px rgba(245, 158, 11, 0.3)",
+                  justifyContent: "space-between",
+                  flexWrap: "wrap",
+                  gap: "14px",
                 }}
-                title="Regenerate missing chunks on returned or replaced drives"
               >
-                <RefreshCw size={13} className={healing ? "spin" : ""} />
-                <span>{healing ? "Rebuilding Chunks..." : "Rebuild / Heal Pool"}</span>
-              </button>
-            </div>
-          )}
+                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                  <AlertTriangle size={22} color="#f59e0b" style={{ flexShrink: 0 }} />
+                  <div>
+                    <div style={{ fontSize: "13px", fontWeight: "700", color: "#f59e0b" }}>
+                      Storage Pool Degraded (Drive Disconnected / Offline)
+                    </div>
+                    <div style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "2px" }}>
+                      Redundancy is reduced, but files remain downloadable and previewable by reconstructing missing chunks from XOR parity or mirror replicas.
+                    </div>
+                  </div>
+                </div>
 
-        {/* Heal Progress Bar */}
-        {healProgress !== null && (
-          <div style={{ margin: "0 28px 16px" }}>
+                <button
+                  className="btn-interactive"
+                  onClick={handleHealPool}
+                  disabled={healing}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    padding: "8px 18px",
+                    backgroundColor: "#f59e0b",
+                    color: "#ffffff",
+                    fontWeight: "700",
+                    fontSize: "12px",
+                    borderRadius: "var(--radius-sm)",
+                    border: "none",
+                    cursor: healing ? "not-allowed" : "pointer",
+                    opacity: healing ? 0.7 : 1,
+                    boxShadow: "0 2px 4px rgba(245, 158, 11, 0.3)",
+                  }}
+                  title="Regenerate missing chunks on returned or replaced drives"
+                >
+                  <RefreshCw size={13} className={healing ? "spin" : ""} />
+                  <span>{healing ? "Rebuilding Chunks..." : "Rebuild / Heal Pool"}</span>
+                </button>
+              </div>
+            )}
+
+            {/* Heal Progress Bar */}
+            {healProgress !== null && (
+              <div style={{ margin: "0 28px 16px" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    fontSize: "11px",
+                    color: "var(--text-muted)",
+                    marginBottom: "4px",
+                  }}
+                >
+                  <span>Rebuilding and restoring chunk redundancy across pool...</span>
+                  <span>{healProgress}%</span>
+                </div>
+                <div
+                  style={{
+                    width: "100%",
+                    height: "4px",
+                    backgroundColor: "var(--bg-surface-elevated)",
+                    borderRadius: "var(--radius-full)",
+                    overflow: "hidden",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${healProgress}%`,
+                      height: "100%",
+                      backgroundColor: "#f59e0b",
+                      transition: "width 0.3s ease",
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* 2-Column Responsive Panel (Drives & Files) */}
             <div
               style={{
-                display: "flex",
-                justifyContent: "space-between",
-                fontSize: "11px",
-                color: "var(--text-muted)",
-                marginBottom: "4px",
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
+                gap: "24px",
+                padding: "0 28px 48px",
               }}
             >
-              <span>Rebuilding and restoring chunk redundancy across pool...</span>
-              <span>{healProgress}%</span>
-            </div>
-            <div
-              style={{
-                width: "100%",
-                height: "4px",
-                backgroundColor: "var(--bg-surface-elevated)",
-                borderRadius: "var(--radius-full)",
-                overflow: "hidden",
-              }}
-            >
-              <div
-                style={{
-                  width: `${healProgress}%`,
-                  height: "100%",
-                  backgroundColor: "#f59e0b",
-                  transition: "width 0.3s ease",
-                }}
+              {/* Drives Panel (Panel 2) */}
+              <DrivesPanel
+                drives={drives}
+                loading={loading}
+                onToggleOffline={handleToggleOffline}
+                onDeleteDrive={handleDeleteDrive}
+                onAddDrive={handleAddDrive}
+                onEjectDrive={handleEjectDrive}
+              />
+
+              {/* Files Panel (Panel 3) */}
+              <FilesPanel
+                files={files}
+                drives={drives}
+                loading={loading}
+                unlocked={unlocked}
+                onUploadFile={handleUploadFile}
+                onDownloadFile={handleDownloadFile}
+                onDeleteFile={handleDeleteFile}
+                onSelectFile={(f) => setSelectedFile(f)}
+                onPreviewFile={(f) => setPreviewFile(f)}
+                onReprotectFile={handleReprotectFile}
+                onReprotectAll={handleReprotectAll}
+                uploadProgress={uploadProgress}
               />
             </div>
-          </div>
+          </>
         )}
-
-        {/* 2-Column Responsive Panel (Drives & Files) */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
-            gap: "24px",
-            padding: "0 28px 48px",
-          }}
-        >
-          {/* Drives Panel (Panel 2) */}
-          <DrivesPanel
-            drives={drives}
-            loading={loading}
-            onToggleOffline={handleToggleOffline}
-            onDeleteDrive={handleDeleteDrive}
-            onAddDrive={handleAddDrive}
-            onEjectDrive={handleEjectDrive}
-          />
-
-          {/* Files Panel (Panel 3) */}
-          <FilesPanel
-            files={files}
-            drives={drives}
-            loading={loading}
-            unlocked={unlocked}
-            onUploadFile={handleUploadFile}
-            onDownloadFile={handleDownloadFile}
-            onDeleteFile={handleDeleteFile}
-            onSelectFile={(f) => setSelectedFile(f)}
-            onPreviewFile={(f) => setPreviewFile(f)}
-            onReprotectFile={handleReprotectFile}
-            onReprotectAll={handleReprotectAll}
-            uploadProgress={uploadProgress}
-          />
-        </div>
       </main>
 
       {/* Modals & Drawers */}

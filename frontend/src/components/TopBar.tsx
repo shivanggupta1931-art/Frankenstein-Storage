@@ -1,5 +1,5 @@
 import React from "react";
-import { Lock, Unlock, Key, RefreshCw, Activity, Sun, Moon } from "lucide-react";
+import { Lock, Key, RefreshCw, Activity, Sun, Moon } from "lucide-react";
 
 interface TopBarProps {
   unlocked: boolean;
@@ -135,10 +135,11 @@ export const TopBar: React.FC<TopBarProps> = ({
             fontSize: "12px",
             fontWeight: "500",
             color: unlocked ? "var(--text-primary)" : "var(--text-muted)",
-            opacity: unlocked ? 1 : 0.5,
+            opacity: unlocked ? 1 : 0.4,
+            cursor: unlocked ? "pointer" : "not-allowed",
           }}
           aria-label="Run storage parity and integrity audit"
-          title="Verify parity and chunk integrity"
+          title={unlocked ? "Verify parity and chunk integrity" : "Unlock vault to run integrity check"}
         >
           <RefreshCw size={13} className={verifying ? "animate-spin" : ""} />
           <span>Verify</span>
@@ -148,6 +149,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         <button
           className="btn-interactive"
           onClick={onOpenActivity}
+          disabled={!unlocked}
           style={{
             display: "flex",
             alignItems: "center",
@@ -158,10 +160,12 @@ export const TopBar: React.FC<TopBarProps> = ({
             borderRadius: "var(--radius-md)",
             fontSize: "12px",
             fontWeight: "500",
-            color: "var(--text-primary)",
+            color: unlocked ? "var(--text-primary)" : "var(--text-muted)",
+            opacity: unlocked ? 1 : 0.4,
+            cursor: unlocked ? "pointer" : "not-allowed",
           }}
           aria-label="View activity audit log"
-          title="View operation log"
+          title={unlocked ? "View operation log" : "Unlock vault to view activity log"}
         >
           <Activity size={13} />
           <span>Activity</span>
@@ -211,7 +215,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           {theme === "dark" ? <Sun size={15} color="var(--status-warning)" /> : <Moon size={15} color="var(--accent-cyan-solid)" />}
         </button>
 
-        {/* Vault lock / unlock button - solid colors */}
+        {/* Vault lock / unlock button */}
         {unlocked ? (
           <button
             className="btn-interactive"
@@ -221,17 +225,19 @@ export const TopBar: React.FC<TopBarProps> = ({
               alignItems: "center",
               gap: "6px",
               padding: "6px 14px",
-              backgroundColor: "var(--status-online-bg)",
-              border: "1px solid var(--status-online)",
+              backgroundColor: "rgba(239, 68, 68, 0.12)",
+              border: "1px solid rgba(239, 68, 68, 0.4)",
               borderRadius: "var(--radius-md)",
-              color: "var(--status-online-text)",
+              color: "#ef4444",
               fontSize: "12px",
               fontWeight: "600",
+              cursor: "pointer",
             }}
             aria-label="Lock storage vault"
+            title="Lock dashboard & wipe encryption keys from memory"
           >
-            <Unlock size={14} />
-            <span>Unlocked</span>
+            <Lock size={14} />
+            <span>Lock Vault</span>
           </button>
         ) : (
           <button
@@ -251,6 +257,7 @@ export const TopBar: React.FC<TopBarProps> = ({
               boxShadow: "var(--shadow-sm)",
             }}
             aria-label="Unlock storage vault"
+            title="Enter master password to unlock dashboard"
           >
             <Lock size={14} />
             <span>Unlock Vault</span>

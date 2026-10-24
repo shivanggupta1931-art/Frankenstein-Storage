@@ -18,6 +18,11 @@ from backend.app.services import drive_service, storage_engine
 router = APIRouter(prefix="/api/v1")
 
 
+def require_unlocked() -> None:
+    if not key_manager.is_unlocked():
+        raise AppError(403, "VAULT_LOCKED", "Storage vault is locked. Please unlock with master password first.")
+
+
 class UnlockRequest(BaseModel):
     password: str = Field(..., min_length=1)
 
@@ -75,21 +80,35 @@ def lock_vault():
 
 @router.get("/overview")
 def get_overview():
+    if not key_manager.is_unlocked():
+        return {
+            "total_bytes": 0,
+            "used_bytes": 0,
+            "free_bytes": 0,
+            "total_files": 0,
+            "drives_count": 0,
+            "online_drives_count": 0,
+            "pool_health": "locked",
+            "redundancy_mode": "locked",
+            "vault_unlocked": False,
+        }
     with get_db() as conn:
         drives = drive_service.list_drives(conn)
         overview = drive_service.calculate_pooled_overview(conn, drives)
-        overview["vault_unlocked"] = key_manager.is_unlocked()
+        overview["vault_unlocked"] = True
         return overview
 
 
 @router.get("/drives")
 def get_drives():
+    require_unlocked()
     with get_db() as conn:
         return drive_service.list_drives(conn)
 
 
 @router.post("/drives")
 def create_drive(req: AddDriveRequest):
+    require_unlocked()
     with get_db() as conn:
         path_str = req.path or ""
         return drive_service.add_drive(
@@ -103,6 +122,7 @@ def create_drive(req: AddDriveRequest):
 
 @router.patch("/drives/{drive_id}")
 def update_drive(drive_id: str, req: PatchDriveRequest):
+    require_unlocked()
     with get_db() as conn:
         return drive_service.patch_drive(
             conn,
@@ -117,6 +137,7 @@ def update_drive(drive_id: str, req: PatchDriveRequest):
 
 @router.delete("/drives/{drive_id}")
 def remove_drive(drive_id: str):
+    require_unlocked()
     with get_db() as conn:
         drive_service.delete_drive(conn, drive_id)
         return {"status": "deleted", "drive_id": drive_id}
@@ -124,12 +145,14 @@ def remove_drive(drive_id: str):
 
 @router.post("/drives/{drive_id}/eject")
 def eject_drive(drive_id: str):
+    require_unlocked()
     with get_db() as conn:
         return drive_service.eject_drive(conn, drive_id)
 
 
 @router.get("/system/macos-storage")
 def get_macos_storage():
+    require_unlocked()
     return {
         "locations": drive_service.get_macos_storage_locations(),
     }
@@ -137,6 +160,7 @@ def get_macos_storage():
 
 @router.get("/system/external-drives")
 def get_external_drives():
+    require_unlocked()
     return {
         "external_drives": drive_service.get_external_usb_drives(),
     }
@@ -144,6 +168,7 @@ def get_external_drives():
 
 @router.post("/system/setup-real-drives")
 def setup_real_drives():
+    require_unlocked()
     with get_db() as conn:
         home = Path.home()
         created = []
@@ -167,6 +192,7 @@ class PreferenceUpdateRequest(BaseModel):
 
 @router.get("/settings/preferences")
 def get_upload_preferences():
+    require_unlocked()
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT preferred_mode FROM upload_preferences WHERE user_id = 'default'")
@@ -180,6 +206,7 @@ def get_upload_preferences():
 
 @router.put("/settings/preferences")
 def update_upload_preferences(req: PreferenceUpdateRequest):
+    require_unlocked()
     if req.preferred_mode is not None and req.preferred_mode not in ("whole", "chunked_parity"):
         raise AppError(
             400,
@@ -205,6 +232,7 @@ def get_files(
     sort_by: str = Query("created_at", pattern="^(created_at|size|name)$"),
     order: str = Query("desc", pattern="^(asc|desc)$"),
 ):
+    require_unlocked()
     valid_sorts = {"created_at": "created_at", "size": "size", "name": "name"}
     col = valid_sorts.get(sort_by, "created_at")
     dir_str = "ASC" if order.lower() == "asc" else "DESC"
@@ -299,6 +327,7 @@ async def upload_file(
     overwrite: bool = Query(False, description="Overwrite if exists"),
     mode: str = Query("auto", description="Storage mode: auto, chunked_parity, mirrored, or whole"),
 ):
+    require_unlocked()
     valid_modes = ("auto", "chunked_parity", "mirrored", "whole")
     if mode not in valid_modes:
         raise AppError(
@@ -320,6 +349,7 @@ async def upload_file(
 
 @router.get("/files/{file_id}/download")
 def download_file(file_id: str):
+    require_unlocked()
     conn = create_connection()
     try:
         meta, generator, _tracker = storage_engine.download_stream(conn, file_id)
@@ -352,6 +382,7 @@ def download_file(file_id: str):
 @router.get("/files/{file_id}/preview")
 def preview_file(file_id: str):
     """Retrieves and decrypts file chunks, returning content inline for in-app browser preview."""
+    require_unlocked()
     with get_db() as conn:
         meta, content = storage_engine.retrieve_file(conn, file_id)
 
@@ -375,12 +406,14 @@ def preview_file(file_id: str):
 
 @router.get("/files/{file_id}/chunks")
 def get_file_chunks(file_id: str):
+    require_unlocked()
     with get_db() as conn:
         return storage_engine.get_file_chunks_map(conn, file_id)
 
 
 @router.delete("/files/{file_id}")
 def delete_file_endpoint(file_id: str):
+    require_unlocked()
     with get_db() as conn:
         storage_engine.delete_file(conn, file_id)
         return {"status": "deleted", "file_id": file_id}
@@ -388,18 +421,21 @@ def delete_file_endpoint(file_id: str):
 
 @router.post("/files/{file_id}/reprotect")
 def reprotect_file_endpoint(file_id: str):
+    require_unlocked()
     with get_db() as conn:
         return storage_engine.reprotect_file(conn, file_id)
 
 
 @router.post("/files/reprotect-all")
 def reprotect_all_files_endpoint():
+    require_unlocked()
     with get_db() as conn:
         return storage_engine.reprotect_all_files(conn)
 
 
 @router.post("/integrity/verify")
 def verify_system_integrity(req: VerifyRequest):
+    require_unlocked()
     with get_db() as conn:
         target_file_id = None if req.all else req.file_id
         return storage_engine.verify_integrity(conn, target_file_id)
@@ -408,12 +444,14 @@ def verify_system_integrity(req: VerifyRequest):
 @router.post("/heal")
 def heal_storage_pool():
     """Regenerates missing chunks from XOR parity or mirror replicas to return files to Healthy status."""
+    require_unlocked()
     with get_db() as conn:
         return storage_engine.heal_pool(conn)
 
 
 @router.get("/activity")
 def get_activity_log():
+    require_unlocked()
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT id, operation, details, status, created_at FROM operation_log ORDER BY id DESC LIMIT 50")

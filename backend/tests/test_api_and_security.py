@@ -237,3 +237,59 @@ async def test_get_files_sorting_options(async_client):
     assert names == sorted(names)
 
 
+@pytest.mark.asyncio
+async def test_locked_vault_blocks_all_operations(test_env, async_client):
+    """When vault is locked, all operations are rejected with 403 VAULT_LOCKED and overview is sanitized."""
+    from backend.app.crypto.key_manager import key_manager
+
+    # 1. Lock vault
+    key_manager.lock()
+    assert not key_manager.is_unlocked()
+
+    # Health returns unlocked=False
+    res_health = await async_client.get("/api/v1/health")
+    assert res_health.status_code == 200
+    assert res_health.json()["unlocked"] is False
+
+    # Overview returns sanitized locked response
+    res_ov = await async_client.get("/api/v1/overview")
+    assert res_ov.status_code == 200
+    ov_data = res_ov.json()
+    assert ov_data["vault_unlocked"] is False
+    assert ov_data["pool_health"] == "locked"
+    assert ov_data["total_bytes"] == 0
+
+    # Drives listing blocked
+    res_drives = await async_client.get("/api/v1/drives")
+    assert res_drives.status_code == 403
+    assert res_drives.json()["error"]["code"] == "VAULT_LOCKED"
+
+    # Files listing blocked
+    res_files = await async_client.get("/api/v1/files")
+    assert res_files.status_code == 403
+    assert res_files.json()["error"]["code"] == "VAULT_LOCKED"
+
+    # Drive creation blocked
+    res_add = await async_client.post("/api/v1/drives", json={"display_name": "HackDrive"})
+    assert res_add.status_code == 403
+    assert res_add.json()["error"]["code"] == "VAULT_LOCKED"
+
+    # Heal blocked
+    res_heal = await async_client.post("/api/v1/heal")
+    assert res_heal.status_code == 403
+    assert res_heal.json()["error"]["code"] == "VAULT_LOCKED"
+
+    # Activity blocked
+    res_act = await async_client.get("/api/v1/activity")
+    assert res_act.status_code == 403
+    assert res_act.json()["error"]["code"] == "VAULT_LOCKED"
+
+    # 2. Unlock vault with password restores full access
+    res_unlock = await async_client.post("/api/v1/unlock", json={"password": test_env["password"]})
+    assert res_unlock.status_code == 200
+    assert key_manager.is_unlocked()
+
+    res_files_after = await async_client.get("/api/v1/files")
+    assert res_files_after.status_code == 200
+
+
