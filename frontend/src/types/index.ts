@@ -12,7 +12,7 @@ export interface Drive {
   display_name: string;
   path: string;
   provider_type?: "local" | "gdrive";
-  status: "online" | "simulated_offline" | "unavailable" | "low_space";
+  status: "online" | "simulated_offline" | "unavailable" | "offline" | "low_space";
   simulated_offline: boolean;
   available: boolean;
   usage: DriveUsage;
@@ -28,7 +28,21 @@ export interface Drive {
   shared_volume_name?: string;
   device_id?: string;
   volume_name?: string;
+  is_external?: boolean;
+  is_removable?: boolean;
   created_at: string;
+}
+
+export interface ExternalUsbDrive {
+  name: string;
+  path: string;
+  total: number;
+  free: number;
+  used: number;
+  is_external: boolean;
+  is_removable: boolean;
+  volume_name: string;
+  description: string;
 }
 
 export interface Chunk {

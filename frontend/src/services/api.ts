@@ -1,4 +1,4 @@
-import { Drive, StoredFile, PoolOverview, Chunk, ActivityItem, UploadPreference } from "../types";
+import { Drive, StoredFile, PoolOverview, Chunk, ActivityItem, UploadPreference, ExternalUsbDrive } from "../types";
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:8765/api/v1";
 
@@ -346,6 +346,10 @@ class ApiService {
     return this.request("/files/reprotect-all", {
       method: "POST",
     });
+  }
+
+  async getExternalDrives(): Promise<{ external_drives: ExternalUsbDrive[] }> {
+    return this.request<{ external_drives: ExternalUsbDrive[] }>("/system/external-drives");
   }
 }
 

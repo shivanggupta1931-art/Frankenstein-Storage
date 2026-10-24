@@ -129,6 +129,13 @@ def get_macos_storage():
     }
 
 
+@router.get("/system/external-drives")
+def get_external_drives():
+    return {
+        "external_drives": drive_service.get_external_usb_drives(),
+    }
+
+
 @router.post("/system/setup-real-drives")
 def setup_real_drives():
     with get_db() as conn:

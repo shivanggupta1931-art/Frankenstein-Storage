@@ -14,8 +14,9 @@ import {
   Compass,
   RefreshCw,
   AlertTriangle,
+  Usb,
 } from "lucide-react";
-import { Drive } from "../types";
+import { Drive, ExternalUsbDrive } from "../types";
 import { formatBytes, getDriveColor } from "../utils/format";
 import { api } from "../services/api";
 
@@ -39,6 +40,7 @@ interface MacosLocation {
   free: number;
   used: number;
   is_external: boolean;
+  is_removable?: boolean;
   is_cloud_synced?: boolean;
   description: string;
 }
@@ -54,6 +56,9 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
   const [providerType, setProviderType] = useState<"local" | "gdrive">("local");
   const [path, setPath] = useState("");
   const [displayName, setDisplayName] = useState("");
+
+  // External USB drives detection
+  const [externalDrives, setExternalDrives] = useState<ExternalUsbDrive[]>([]);
 
   // Google Drive tab state
   const [gdriveLink, setGdriveLink] = useState("");
@@ -87,6 +92,26 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
       fetchMacosLocations();
     }
   }, [showAddForm]);
+
+  // Poll connected external USB devices for auto-detection and hot-plug prompt
+  useEffect(() => {
+    let active = true;
+    const fetchUsb = () => {
+      api.getExternalDrives()
+        .then((res) => {
+          if (active) {
+            setExternalDrives(res.external_drives || []);
+          }
+        })
+        .catch(() => {});
+    };
+    fetchUsb();
+    const timer = setInterval(fetchUsb, 4000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, []);
 
   // Automatically extract Google Drive folder ID when link is entered
   const handleGdriveLinkChange = (val: string) => {
@@ -593,6 +618,24 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
                               <Cloud size={10} />
                               <span>AUTO-SYNC</span>
                             </span>
+                          ) : (loc.is_external || loc.is_removable) ? (
+                            <span
+                              style={{
+                                fontSize: "9px",
+                                fontWeight: "700",
+                                padding: "2px 6px",
+                                backgroundColor: "rgba(6, 182, 212, 0.2)",
+                                color: "#38bdf8",
+                                border: "1px solid rgba(56, 189, 248, 0.4)",
+                                borderRadius: "var(--radius-xs)",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "3px",
+                              }}
+                            >
+                              <Usb size={10} />
+                              <span>USB DRIVE</span>
+                            </span>
                           ) : null}
                         </div>
                         <div style={{ fontSize: "10px", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
@@ -862,6 +905,94 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
           </div>
         )}
 
+        {/* Unmounted Detected USB Pendrives Banner */}
+        {(() => {
+          const unmountedUsbs = externalDrives.filter(
+            (usb) => !drives.some((d) => d.path === usb.path || d.path.startsWith(usb.path.replace("/FrankensteinStorage", "")))
+          );
+          if (unmountedUsbs.length === 0) return null;
+          return unmountedUsbs.map((usb) => (
+            <div
+              key={usb.path}
+              style={{
+                background: "linear-gradient(135deg, rgba(6, 182, 212, 0.12), rgba(59, 130, 246, 0.12))",
+                border: "1px solid rgba(6, 182, 212, 0.45)",
+                borderRadius: "var(--radius-md, 10px)",
+                padding: "14px 18px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                flexWrap: "wrap",
+                gap: "12px",
+                boxShadow: "0 4px 16px rgba(6, 182, 212, 0.1)",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
+                <div
+                  style={{
+                    width: "38px",
+                    height: "38px",
+                    borderRadius: "8px",
+                    background: "rgba(6, 182, 212, 0.2)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "var(--accent-cyan-solid, #06b6d4)",
+                    flexShrink: 0,
+                  }}
+                >
+                  <Usb size={20} />
+                </div>
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                    <span style={{ fontWeight: 600, fontSize: "14px", color: "var(--text-primary)" }}>
+                      External USB Drive Detected
+                    </span>
+                    <span
+                      style={{
+                        fontSize: "10px",
+                        fontWeight: 700,
+                        padding: "1px 6px",
+                        borderRadius: "4px",
+                        background: "rgba(6, 182, 212, 0.25)",
+                        color: "#38bdf8",
+                        border: "1px solid rgba(56, 189, 248, 0.4)",
+                      }}
+                    >
+                      HOT-PLUG READY
+                    </span>
+                  </div>
+                  <div style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "2px" }}>
+                    <strong>{usb.volume_name}</strong> • {formatBytes(usb.free)} free of {formatBytes(usb.total)} • Mount: <code style={{ fontSize: "11px", color: "var(--text-muted)" }}>{usb.path}</code>
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => onAddDrive(usb.path, usb.name, "local")}
+                className="btn-interactive"
+                style={{
+                  background: "var(--accent-cyan-solid, #06b6d4)",
+                  color: "#ffffff",
+                  border: "none",
+                  padding: "8px 16px",
+                  borderRadius: "var(--radius-sm, 6px)",
+                  fontWeight: 600,
+                  fontSize: "12px",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  boxShadow: "0 2px 10px rgba(6, 182, 212, 0.25)",
+                }}
+              >
+                <Usb size={15} />
+                <span>Connect Detected USB Drive: {usb.volume_name}</span>
+              </button>
+            </div>
+          ));
+        })()}
+
         {drives.map((drive, idx) => {
           const driveColor = getDriveColor(idx);
           const isSimulated = drive.simulated_offline;
@@ -874,6 +1005,15 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
             drive.path.includes("CloudStorage") ||
             drive.display_name.toLowerCase().includes("google drive") ||
             Boolean(drive.usage?.source?.includes("Google Drive"));
+
+          const isUsb = Boolean(
+            drive.is_external ||
+            drive.is_removable ||
+            drive.path.startsWith("/Volumes/") ||
+            drive.display_name.toLowerCase().includes("usb") ||
+            drive.usage?.source?.toLowerCase().includes("usb") ||
+            drive.volume_name?.toLowerCase().includes("usb")
+          );
 
           const total = drive.usage?.total || 0;
           const used = drive.usage?.used || 0;
@@ -932,6 +1072,24 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
                         >
                           <Cloud size={10} />
                           <span>GOOGLE DRIVE</span>
+                        </span>
+                      ) : isUsb ? (
+                        <span
+                          style={{
+                            fontSize: "9px",
+                            fontWeight: "700",
+                            padding: "1px 6px",
+                            backgroundColor: "rgba(6, 182, 212, 0.15)",
+                            color: "var(--accent-cyan-solid, #06b6d4)",
+                            border: "1px solid rgba(6, 182, 212, 0.4)",
+                            borderRadius: "var(--radius-sm)",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "3px",
+                          }}
+                        >
+                          <Usb size={10} />
+                          <span>EXTERNAL USB</span>
                         </span>
                       ) : (
                         <span
@@ -1055,18 +1213,24 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
                         ? "var(--status-online-bg)"
                         : isSimulated
                         ? "var(--status-simulated-bg)"
+                        : isUsb
+                        ? "rgba(239, 68, 68, 0.15)"
                         : "var(--status-offline-bg)",
                       border: `1px solid ${
                         isOnline
                           ? "var(--status-online)"
                           : isSimulated
                           ? "var(--status-simulated)"
+                          : isUsb
+                          ? "#ef4444"
                           : "var(--status-offline)"
                       }`,
                       color: isOnline
                         ? "var(--status-online-text)"
                         : isSimulated
                         ? "var(--status-simulated-text)"
+                        : isUsb
+                        ? "#ef4444"
                         : "var(--status-offline-text)",
                     }}
                   >
@@ -1079,10 +1243,22 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
                           ? "var(--status-online)"
                           : isSimulated
                           ? "var(--status-simulated)"
+                          : isUsb
+                          ? "#ef4444"
                           : "var(--status-offline)",
                       }}
                     />
-                    <span>{isOnline ? "Online" : isSimulated ? "Simulated offline" : "Unavailable"}</span>
+                    <span>
+                      {isOnline
+                        ? isUsb
+                          ? "Online (USB)"
+                          : "Online"
+                        : isSimulated
+                        ? "Simulated offline"
+                        : isUsb
+                        ? "Unplugged / Offline"
+                        : "Unavailable"}
+                    </span>
                   </span>
 
                   {/* Toggle simulated offline button */}
@@ -1155,6 +1331,25 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
                   />
                 </div>
               </div>
+
+              {isUsb && !isOnline && !isSimulated && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    padding: "8px 12px",
+                    backgroundColor: "rgba(239, 68, 68, 0.08)",
+                    border: "1px solid rgba(239, 68, 68, 0.25)",
+                    borderRadius: "var(--radius-sm)",
+                    fontSize: "12px",
+                    color: "#f87171",
+                  }}
+                >
+                  <AlertCircle size={15} style={{ flexShrink: 0 }} />
+                  <span>Pendrive disconnected. Plug back in or rebuild from parity.</span>
+                </div>
+              )}
             </div>
           );
         })}

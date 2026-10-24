@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import shutil
 import sqlite3
@@ -60,7 +61,8 @@ def list_drives(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             is_eligible = False
         elif not avail:
             effective_status = "unavailable"
-            exclusion_reason = "Offline (Storage path unreachable)"
+            is_usb = bool(dev_info.get("is_external") or usage.get("is_external"))
+            exclusion_reason = "Pendrive disconnected or path unreachable" if is_usb else "Offline (Storage path unreachable)"
             is_eligible = False
         elif is_low_space:
             effective_status = "low_space"
@@ -109,6 +111,8 @@ def list_drives(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             "st_dev": dev_info.get("st_dev"),
             "mount_point": dev_info.get("mount_point"),
             "volume_name": dev_info.get("volume_name"),
+            "is_external": bool(dev_info.get("is_external") or usage.get("is_external")),
+            "is_removable": bool(dev_info.get("is_removable") or usage.get("is_removable")),
             "created_at": row["created_at"],
         })
 
@@ -131,6 +135,68 @@ def list_drives(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             r["shared_volume_name"] = r.get("volume_name")
 
     return results
+
+
+def get_external_usb_drives() -> list[dict[str, Any]]:
+    """Scans /Volumes for mounted external USB / removable storage devices."""
+    external_drives: list[dict[str, Any]] = []
+    volumes_dir = Path("/Volumes")
+    if not volumes_dir.exists():
+        return external_drives
+
+    root_dev = None
+    try:
+        root_dev = os.stat("/").st_dev
+    except Exception:
+        pass
+
+    try:
+        for vol in volumes_dir.iterdir():
+            # Filter internal system volumes and aliases
+            if vol.name in ("Recovery", "Macintosh HD") or vol.name.startswith("."):
+                continue
+            if "timemachine" in vol.name.lower():
+                continue
+            if vol.is_symlink():
+                continue
+            # Ignore Google Drive desktop mounts
+            if "googledrive" in vol.name.lower() or "google drive" in vol.name.lower():
+                continue
+
+            try:
+                # Check device ID against root to skip root filesystem aliases
+                vol_stat = os.stat(vol)
+                if root_dev is not None and vol_stat.st_dev == root_dev:
+                    continue
+
+                # Verify read/write accessibility
+                if not os.access(vol, os.R_OK | os.W_OK):
+                    continue
+
+                vol_usage = shutil.disk_usage(vol)
+                target_folder = vol / "FrankensteinStorage"
+                try:
+                    target_folder.mkdir(parents=True, exist_ok=True)
+                except Exception:
+                    pass
+
+                external_drives.append({
+                    "name": f"USB Drive: {vol.name}",
+                    "path": str(target_folder),
+                    "total": vol_usage.total,
+                    "free": vol_usage.free,
+                    "used": vol_usage.used,
+                    "is_external": True,
+                    "is_removable": True,
+                    "volume_name": vol.name,
+                    "description": f"Physical external USB / removable drive at /Volumes/{vol.name}",
+                })
+            except Exception:
+                continue
+    except (PermissionError, OSError):
+        pass
+
+    return external_drives
 
 
 def calculate_pooled_overview(conn: sqlite3.Connection, drives: list[dict[str, Any]]) -> dict[str, Any]:
@@ -296,34 +362,36 @@ def get_macos_storage_locations() -> list[dict[str, Any]]:
     except Exception:
         pass
 
-    # 4. Mounted external volumes under /Volumes (USB drives, external SSDs, Google Drive)
+    # 4. Mounted external USB / removable drives under /Volumes
+    locations.extend(get_external_usb_drives())
+
+    # Detect Google Drive desktop volumes if mounted under /Volumes
     volumes_dir = Path("/Volumes")
     if volumes_dir.exists():
         for vol in volumes_dir.iterdir():
-            if vol.name in ("Recovery",) or vol.name.startswith("."):
+            if vol.name.startswith(".") or vol.is_symlink():
                 continue
-            if vol.is_symlink():
-                continue
-            try:
-                vol_usage = shutil.disk_usage(vol)
-                is_gdrive_vol = "googledrive" in vol.name.lower() or "google drive" in vol.name.lower()
-                my_drive_vol = vol / "My Drive"
-                target_path = my_drive_vol if my_drive_vol.exists() else vol
-                sample_folder = target_path / "sample"
-                final_path = sample_folder if sample_folder.exists() else (target_path / "FrankensteinVault")
-                gdrive_vol_quota = 15 * (1024 ** 3) if is_gdrive_vol else vol_usage.total
-                locations.append({
-                    "name": f"Google Drive Desktop ({vol.name})" if is_gdrive_vol else f"External Volume: {vol.name}",
-                    "path": str(final_path),
-                    "total": gdrive_vol_quota,
-                    "free": gdrive_vol_quota if is_gdrive_vol else vol_usage.free,
-                    "used": 0 if is_gdrive_vol else vol_usage.used,
-                    "is_external": not is_gdrive_vol,
-                    "is_cloud_synced": is_gdrive_vol,
-                    "description": "Auto-syncs chunks directly to Google Drive in real-time" if is_gdrive_vol else f"Physical external USB / SSD disk at /Volumes/{vol.name}",
-                })
-            except Exception:
-                continue
+            is_gdrive_vol = "googledrive" in vol.name.lower() or "google drive" in vol.name.lower()
+            if is_gdrive_vol:
+                try:
+                    vol_usage = shutil.disk_usage(vol)
+                    my_drive_vol = vol / "My Drive"
+                    target_path = my_drive_vol if my_drive_vol.exists() else vol
+                    sample_folder = target_path / "sample"
+                    final_path = sample_folder if sample_folder.exists() else (target_path / "FrankensteinVault")
+                    gdrive_vol_quota = 15 * (1024 ** 3)
+                    locations.append({
+                        "name": f"Google Drive Desktop ({vol.name})",
+                        "path": str(final_path),
+                        "total": gdrive_vol_quota,
+                        "free": gdrive_vol_quota,
+                        "used": 0,
+                        "is_external": False,
+                        "is_cloud_synced": True,
+                        "description": "Auto-syncs chunks directly to Google Drive in real-time",
+                    })
+                except Exception:
+                    continue
 
     # 5. Cloud Storage providers (Google Drive for Desktop in ~/Library/CloudStorage)
     cloud_storage = home / "Library" / "CloudStorage"
