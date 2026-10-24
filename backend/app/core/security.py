@@ -15,7 +15,15 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         host = request.headers.get("host", "").lower().strip()
         if host and not settings.allow_all_hosts:
             base_host = host.split(":")[0]
-            if base_host not in settings.allowed_hosts and host not in settings.allowed_hosts:
+            is_permitted_host = (
+                base_host in settings.allowed_hosts
+                or host in settings.allowed_hosts
+                or base_host.endswith(".vercel.app")
+                or base_host.endswith(".loca.lt")
+                or base_host.endswith(".now.sh")
+                or base_host.endswith(".tmp.now")
+            )
+            if not is_permitted_host:
                 return JSONResponse(
                     status_code=403,
                     content={
@@ -42,16 +50,17 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                     or clean_origin.startswith("https://localhost:")
                     or clean_origin in {"http://127.0.0.1", "http://localhost", "http://testserver"}
                 )
-                # Allow all Vercel preview and production domains (*.vercel.app, *.now.sh, *.tmp.now)
-                is_vercel = clean_origin.startswith("https://") and (
+                # Allow all Vercel preview/production domains and tunnels
+                is_cloud_origin = clean_origin.startswith("https://") and (
                     clean_origin.endswith(".vercel.app")
                     or clean_origin.endswith(".now.sh")
                     or clean_origin.endswith(".tmp.now")
+                    or clean_origin.endswith(".loca.lt")
                     or clean_origin == "https://vercel.app"
                 )
                 if (
                     is_loopback
-                    or is_vercel
+                    or is_cloud_origin
                     or clean_origin in settings.allowed_origins
                     or clean_origin.rstrip("/") in settings.allowed_origins
                 ):
