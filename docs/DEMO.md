@@ -25,7 +25,7 @@ Follow this step-by-step 60-second walkthrough to demonstrate pooled encrypted s
 ### Step 1: Configure Token & Unlock Vault (10 seconds)
 1. On first load, if prompted for token, click **Token** in the top bar and paste the session token printed on backend startup. Click **Save Settings**.
 2. Click **Unlock Vault** in the top right.
-3. Enter master password: `iitr@123` and click **Unlock Vault**.
+3. Enter your master password (e.g. `<your-master-password>`) and click **Unlock Vault**.
 4. The status pill transitions from Locked to **Unlocked (Green)**.
 
 ---

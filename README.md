@@ -43,8 +43,7 @@ Frankenstein Storage is deployed and live on Vercel:
 | :--- | :--- |
 | **Production Domain** | [`https://zippy-pumice-qfzzlv8.tmp.now`](https://zippy-pumice-qfzzlv8.tmp.now) |
 | **Preview Deployment** | [`https://zippy-pumice-qfzzlv8-kjlcvukf4-founders23.vercel.app`](https://zippy-pumice-qfzzlv8-kjlcvukf4-founders23.vercel.app) |
-| **Default Master Password** | `iitr@123` |
-| **Session Bearer Token** | `frankenstein-demo-token` |
+| **Authentication** | Zero-Knowledge Vault (Set your private master password on initial unlock) |
 
 ---
 
