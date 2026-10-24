@@ -127,11 +127,12 @@ async def test_api_upload_download_http_flow(async_client):
     assert overview_res.status_code == 200
     assert overview_res.json()["files_count"] >= 1
 
-    # Chunk map check
+    # Chunk map check: small files (< 1 MiB) are mirrored across 2 distinct drives
     chunks_res = await async_client.get(f"/api/v1/files/{file_id}/chunks")
     assert chunks_res.status_code == 200
     chunks = chunks_res.json()
-    assert len(chunks) >= 3
+    assert len(chunks) >= 2
+    assert chunks[0]["drive_id"] != chunks[1]["drive_id"]
 
     # Download
     download_res = await async_client.get(f"/api/v1/files/{file_id}/download")

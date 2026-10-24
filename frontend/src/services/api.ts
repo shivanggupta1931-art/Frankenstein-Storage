@@ -201,7 +201,10 @@ class ApiService {
     });
   }
 
-  async downloadFile(fileId: string, filename: string): Promise<void> {
+  async downloadFile(
+    fileId: string,
+    filename: string
+  ): Promise<{ verified: boolean; sha256: string; wasRebuilt: boolean }> {
     const url = `${this.baseUrl}/files/${fileId}/download`;
     const headers: Record<string, string> = {};
     if (this.token) {
@@ -218,7 +221,22 @@ class ApiService {
       throw new Error(errMsg);
     }
 
+    const expectedSha = res.headers.get("X-File-SHA256") || res.headers.get("x-file-sha256");
+    const wasRebuilt =
+      (res.headers.get("X-Rebuilt-From-Parity") || res.headers.get("x-rebuilt-from-parity")) === "true";
+
     const blob = await res.blob();
+    const arrayBuffer = await blob.arrayBuffer();
+    const hashBuffer = await crypto.subtle.digest("SHA-256", arrayBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const calculatedSha = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+
+    if (expectedSha && calculatedSha.toLowerCase() !== expectedSha.toLowerCase()) {
+      throw new Error(
+        `SHA-256 Integrity Verification Failed! Expected ${expectedSha.slice(0, 10)}... but got ${calculatedSha.slice(0, 10)}...`
+      );
+    }
+
     const downloadUrl = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = downloadUrl;
@@ -226,6 +244,19 @@ class ApiService {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+    window.URL.revokeObjectURL(downloadUrl);
+
+    return {
+      verified: true,
+      sha256: calculatedSha,
+      wasRebuilt,
+    };
+  }
+
+  async healPool(): Promise<any> {
+    return this.request("/heal", {
+      method: "POST",
+    });
   }
 
   getPreviewUrl(fileId: string): string {
@@ -297,11 +328,23 @@ class ApiService {
     return this.request<UploadPreference>("/settings/preferences");
   }
 
-  async setUploadPreference(preferredMode: "whole" | "chunked_parity" | null): Promise<UploadPreference> {
+  async setUploadPreference(preferredMode: "whole" | "chunked_parity" | "mirrored" | null): Promise<UploadPreference> {
     return this.request<UploadPreference>("/settings/preferences", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ preferred_mode: preferredMode }),
+    });
+  }
+
+  async reprotectFile(fileId: string): Promise<any> {
+    return this.request(`/files/${fileId}/reprotect`, {
+      method: "POST",
+    });
+  }
+
+  async reprotectAllFiles(): Promise<any> {
+    return this.request("/files/reprotect-all", {
+      method: "POST",
     });
   }
 }

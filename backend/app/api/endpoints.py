@@ -199,7 +199,7 @@ def get_files(
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            f"""SELECT id, name, folder, size, sha256, storage_mode, status, created_at, updated_at
+            f"""SELECT id, name, folder, size, sha256, storage_mode, protection_status, unprotected_reason, status, created_at, updated_at
                FROM files ORDER BY {col} {dir_str}"""
         )
         files = [dict(row) for row in cursor.fetchall()]
@@ -210,12 +210,51 @@ def get_files(
             f["chunks"] = chunks
             f["total_chunks"] = len(chunks)
 
+            # Determine protection status and badge label
+            p_status = f.get("protection_status")
+            if not p_status:
+                if f.get("storage_mode") == "chunked_parity":
+                    p_status = "parity"
+                elif f.get("storage_mode") == "mirrored":
+                    p_status = "mirrored"
+                else:
+                    p_status = "unprotected"
+            f["protection_status"] = p_status
+
+            if p_status == "parity":
+                f["protection_label"] = "Parity-protected"
+            elif p_status == "mirrored":
+                f["protection_label"] = "Mirrored"
+            else:
+                f["protection_label"] = "Unprotected (single drive)"
+                if not f.get("unprotected_reason"):
+                    f["unprotected_reason"] = "Stored on a single drive without redundancy"
+
             if f.get("storage_mode") == "whole":
-                # Whole object mode: healthy if drive is online, unavailable if drive is offline
                 is_offline = any(c["drive_offline"] for c in chunks)
                 f["health"] = "Unavailable" if is_offline else "Healthy"
+            elif f.get("storage_mode") == "mirrored":
+                stripes: dict[int, list[dict[str, Any]]] = {}
+                for c in chunks:
+                    stripes.setdefault(c["stripe_index"], []).append(c)
+
+                degraded = False
+                unavailable = False
+                for s_idx, s_chunks in stripes.items():
+                    offline_count = sum(1 for c in s_chunks if c["drive_offline"])
+                    if offline_count == 1:
+                        degraded = True
+                    elif offline_count >= 2:
+                        unavailable = True
+
+                if unavailable:
+                    f["health"] = "Unavailable"
+                elif degraded:
+                    f["health"] = "Degraded, still readable"
+                else:
+                    f["health"] = "Healthy"
             else:
-                # Chunked parity mode: evaluate health badge
+                # Chunked parity mode
                 stripes: dict[int, list[dict[str, Any]]] = {}
                 for c in chunks:
                     stripes.setdefault(c["stripe_index"], []).append(c)
@@ -232,7 +271,7 @@ def get_files(
                 if unavailable:
                     f["health"] = "Unavailable"
                 elif degraded:
-                    f["health"] = "Rebuilt from parity"
+                    f["health"] = "Degraded, still readable"
                 else:
                     f["health"] = "Healthy"
 
@@ -245,13 +284,14 @@ async def upload_file(
     name: str = Query(..., description="File name"),
     folder: str = Query("/", description="Logical folder"),
     overwrite: bool = Query(False, description="Overwrite if exists"),
-    mode: str = Query("chunked_parity", description="Storage mode: whole or chunked_parity"),
+    mode: str = Query("auto", description="Storage mode: auto, chunked_parity, mirrored, or whole"),
 ):
-    if mode not in ("whole", "chunked_parity"):
+    valid_modes = ("auto", "chunked_parity", "mirrored", "whole")
+    if mode not in valid_modes:
         raise AppError(
             400,
             "INVALID_STORAGE_MODE",
-            f"Unsupported storage mode: '{mode}'. Allowed modes are 'whole' and 'chunked_parity'.",
+            f"Unsupported storage mode: '{mode}'. Allowed modes are {', '.join(valid_modes)}.",
         )
     with get_db() as conn:
         result = await storage_engine.upload_stream(
@@ -283,6 +323,7 @@ def download_file(file_id: str):
         headers = {
             "Content-Disposition": f'attachment; filename="{ascii_filename}"; filename*=UTF-8\'\'{encoded_filename}',
             "Content-Length": str(meta["size"]),
+            "X-File-SHA256": meta["sha256"],
             "X-Rebuilt-From-Parity": "true" if _tracker.get("was_rebuilt") else "false",
         }
         return StreamingResponse(
@@ -332,11 +373,30 @@ def delete_file_endpoint(file_id: str):
         return {"status": "deleted", "file_id": file_id}
 
 
+@router.post("/files/{file_id}/reprotect")
+def reprotect_file_endpoint(file_id: str):
+    with get_db() as conn:
+        return storage_engine.reprotect_file(conn, file_id)
+
+
+@router.post("/files/reprotect-all")
+def reprotect_all_files_endpoint():
+    with get_db() as conn:
+        return storage_engine.reprotect_all_files(conn)
+
+
 @router.post("/integrity/verify")
 def verify_system_integrity(req: VerifyRequest):
     with get_db() as conn:
         target_file_id = None if req.all else req.file_id
         return storage_engine.verify_integrity(conn, target_file_id)
+
+
+@router.post("/heal")
+def heal_storage_pool():
+    """Regenerates missing chunks from XOR parity or mirror replicas to return files to Healthy status."""
+    with get_db() as conn:
+        return storage_engine.heal_pool(conn)
 
 
 @router.get("/activity")

@@ -12,7 +12,7 @@ interface SettingsModalProps {
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onSaved }) => {
   const [token, setToken] = useState(api.getToken());
   const [baseUrl, setBaseUrl] = useState(api.getBaseUrl());
-  const [preferredMode, setPreferredMode] = useState<"whole" | "chunked_parity" | "none">("none");
+  const [preferredMode, setPreferredMode] = useState<"whole" | "chunked_parity" | "mirrored" | "none">("none");
   const [thresholdBytes, setThresholdBytes] = useState<number>(1048576);
   const [saving, setSaving] = useState(false);
 
@@ -209,6 +209,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
             >
               <option value="none">Always ask on upload (Smart Decision Dialog)</option>
               <option value="whole">Always use Whole Encrypted Object</option>
+              <option value="mirrored">Always use Mirrored (2x copies)</option>
               <option value="chunked_parity">Always use Chunked + XOR Parity</option>
             </select>
           </div>

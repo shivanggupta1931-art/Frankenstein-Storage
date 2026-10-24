@@ -11,6 +11,7 @@ import { ActivityModal } from "../components/ActivityModal";
 import { UploadDecisionModal, StorageMode } from "../components/UploadDecisionModal";
 import { Toasts } from "../components/Toasts";
 import { api } from "../services/api";
+import { AlertTriangle, RefreshCw } from "lucide-react";
 import { Drive, StoredFile, PoolOverview as PoolOverviewType, ToastMessage, UploadPreference } from "../types";
 
 export const Dashboard: React.FC = () => {
@@ -25,6 +26,8 @@ export const Dashboard: React.FC = () => {
   const [files, setFiles] = useState<StoredFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [verifying, setVerifying] = useState(false);
+  const [healing, setHealing] = useState(false);
+  const [healProgress, setHealProgress] = useState<number | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
 
   useEffect(() => {
@@ -181,12 +184,18 @@ export const Dashboard: React.FC = () => {
 
   const onlineDrivesCount = drives.filter((d) => d.status === "online" && !d.simulated_offline).length;
 
-  const executeUpload = async (file: File, overwrite: boolean, mode: StorageMode) => {
+  const executeUpload = async (file: File, overwrite: boolean, mode: StorageMode | "auto") => {
     try {
       setUploadProgress(0);
-      await api.uploadFile(file, overwrite, mode, (pct) => setUploadProgress(pct));
+      await api.uploadFile(file, overwrite, mode as any, (pct) => setUploadProgress(pct));
       const modeDesc =
-        mode === "whole" ? "as whole encrypted object" : "chunked & striped with XOR parity";
+        mode === "whole"
+          ? "as whole encrypted object"
+          : mode === "mirrored"
+          ? "mirrored across 2 drives"
+          : mode === "chunked_parity"
+          ? "chunked & striped with XOR parity"
+          : "with automatic pool redundancy";
       addToast("success", `File '${file.name}' uploaded ${modeDesc}`);
       await refreshData();
     } catch (err: any) {
@@ -197,24 +206,39 @@ export const Dashboard: React.FC = () => {
   };
 
   const handleUploadFile = async (file: File, overwrite: boolean) => {
-    // Check if user has a saved preference
     const savedMode = preference?.preferred_mode;
-
     if (savedMode) {
-      // Validate mode against available online drives
-      if (savedMode === "chunked_parity" && onlineDrivesCount < 3) {
-        addToast(
-          "error",
-          `Default mode is Chunked + Parity, but only ${onlineDrivesCount} drive(s) are online (needs 3). Please choose storage mode.`
-        );
-        setPendingUpload({ file, overwrite });
-        return;
-      }
-      // Preference exists and is valid: bypass dialog
       await executeUpload(file, overwrite, savedMode);
     } else {
-      // No saved preference: prompt with Smart Upload Decision dialog
-      setPendingUpload({ file, overwrite });
+      await executeUpload(file, overwrite, "auto");
+    }
+  };
+
+  const handleReprotectFile = async (fileId: string) => {
+    try {
+      addToast("info", "Re-protecting file across pool...");
+      const res = await api.reprotectFile(fileId);
+      addToast(
+        "success",
+        `File '${res.name}' re-protected (${res.new_mode === "chunked_parity" ? "XOR Parity" : "Mirrored 2x"})`
+      );
+      await refreshData();
+    } catch (err: any) {
+      addToast("error", err.message || "Re-protection failed");
+    }
+  };
+
+  const handleReprotectAll = async () => {
+    try {
+      addToast("info", "Re-protecting all unprotected files...");
+      const res = await api.reprotectAllFiles();
+      addToast(
+        "success",
+        `Re-protection complete: ${res.reprotected} file(s) upgraded, ${res.skipped} skipped, ${res.failed} failed`
+      );
+      await refreshData();
+    } catch (err: any) {
+      addToast("error", err.message || "Bulk re-protection failed");
     }
   };
 
@@ -243,11 +267,48 @@ export const Dashboard: React.FC = () => {
 
   const handleDownloadFile = async (file: StoredFile) => {
     try {
-      addToast("info", `Reassembling & downloading '${file.name}'...`);
-      await api.downloadFile(file.id, file.name);
-      addToast("success", `Downloaded '${file.name}' successfully`);
+      addToast("info", `Reassembling & verifying '${file.name}'...`);
+      const res = await api.downloadFile(file.id, file.name);
+      const rebuiltNote = res?.wasRebuilt ? " • Rebuilt on-the-fly from Parity/Mirror" : "";
+      addToast(
+        "success",
+        `Downloaded '${file.name}' • Verified SHA-256 [${res?.sha256?.slice(0, 8)}...]${rebuiltNote}`
+      );
     } catch (err: any) {
       addToast("error", err.message || "Download failed");
+    }
+  };
+
+  const handleHealPool = async () => {
+    setHealing(true);
+    setHealProgress(25);
+    try {
+      addToast("info", "Rebuilding missing chunks from parity and mirror replicas...");
+      setHealProgress(50);
+      const res = await api.healPool();
+      setHealProgress(100);
+      if (res.status === "healed") {
+        addToast(
+          "success",
+          `Storage Pool Healed: ${res.files_healed} file(s) restored, ${res.chunks_rebuilt} chunk(s) regenerated`
+        );
+      } else if (res.status === "healthy") {
+        addToast(
+          "success",
+          `Storage Pool Healthy: All ${res.files_checked} file(s) already verified healthy`
+        );
+      } else {
+        addToast(
+          "error",
+          `Heal Incomplete: ${res.unrecoverable_files?.length || 0} file(s) unrecoverable due to multiple drive failures`
+        );
+      }
+      await refreshData();
+    } catch (err: any) {
+      addToast("error", err.message || "Heal failed");
+    } finally {
+      setTimeout(() => setHealProgress(null), 800);
+      setHealing(false);
     }
   };
 
@@ -303,6 +364,100 @@ export const Dashboard: React.FC = () => {
         {/* Pool Overview (Panel 1) */}
         <PoolOverview overview={overview} loading={loading} />
 
+        {/* Degraded Mode Banner */}
+        {unlocked &&
+          (drives.some((d) => d.simulated_offline || !d.available) ||
+            files.some((f) => f.health?.includes("Degraded"))) && (
+            <div
+              className="animate-slide-up"
+              style={{
+                margin: "0 28px 20px",
+                padding: "14px 20px",
+                backgroundColor: "rgba(245, 158, 11, 0.12)",
+                border: "1px solid rgba(245, 158, 11, 0.4)",
+                borderRadius: "var(--radius-md)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                flexWrap: "wrap",
+                gap: "14px",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                <AlertTriangle size={22} color="#f59e0b" style={{ flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontSize: "13px", fontWeight: "700", color: "#f59e0b" }}>
+                    Storage Pool Degraded (Drive Disconnected / Offline)
+                  </div>
+                  <div style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "2px" }}>
+                    Redundancy is reduced, but files remain downloadable and previewable by reconstructing missing chunks from XOR parity or mirror replicas.
+                  </div>
+                </div>
+              </div>
+
+              <button
+                className="btn-interactive"
+                onClick={handleHealPool}
+                disabled={healing}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "8px 18px",
+                  backgroundColor: "#f59e0b",
+                  color: "#ffffff",
+                  fontWeight: "700",
+                  fontSize: "12px",
+                  borderRadius: "var(--radius-sm)",
+                  border: "none",
+                  cursor: healing ? "not-allowed" : "pointer",
+                  opacity: healing ? 0.7 : 1,
+                  boxShadow: "0 2px 4px rgba(245, 158, 11, 0.3)",
+                }}
+                title="Regenerate missing chunks on returned or replaced drives"
+              >
+                <RefreshCw size={13} className={healing ? "spin" : ""} />
+                <span>{healing ? "Rebuilding Chunks..." : "Rebuild / Heal Pool"}</span>
+              </button>
+            </div>
+          )}
+
+        {/* Heal Progress Bar */}
+        {healProgress !== null && (
+          <div style={{ margin: "0 28px 16px" }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                fontSize: "11px",
+                color: "var(--text-muted)",
+                marginBottom: "4px",
+              }}
+            >
+              <span>Rebuilding and restoring chunk redundancy across pool...</span>
+              <span>{healProgress}%</span>
+            </div>
+            <div
+              style={{
+                width: "100%",
+                height: "4px",
+                backgroundColor: "var(--bg-surface-elevated)",
+                borderRadius: "var(--radius-full)",
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  width: `${healProgress}%`,
+                  height: "100%",
+                  backgroundColor: "#f59e0b",
+                  transition: "width 0.3s ease",
+                }}
+              />
+            </div>
+          </div>
+        )}
+
         {/* 2-Column Responsive Panel (Drives & Files) */}
         <div
           style={{
@@ -332,6 +487,8 @@ export const Dashboard: React.FC = () => {
             onDeleteFile={handleDeleteFile}
             onSelectFile={(f) => setSelectedFile(f)}
             onPreviewFile={(f) => setPreviewFile(f)}
+            onReprotectFile={handleReprotectFile}
+            onReprotectAll={handleReprotectAll}
             uploadProgress={uploadProgress}
           />
         </div>

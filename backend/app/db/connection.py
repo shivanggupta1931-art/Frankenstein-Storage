@@ -8,8 +8,8 @@ from pathlib import Path
 from backend.app.core.config import settings
 
 
-def create_connection(db_path: Path | None = None) -> sqlite3.Connection:
-    target_path = db_path or settings.database_path
+def create_connection(db_path: Path | str | None = None) -> sqlite3.Connection:
+    target_path = Path(db_path) if db_path else settings.database_path
     target_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(
         str(target_path),

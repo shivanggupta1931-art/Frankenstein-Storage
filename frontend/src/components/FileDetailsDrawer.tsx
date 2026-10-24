@@ -101,6 +101,51 @@ export const FileDetailsDrawer: React.FC<FileDetailsDrawerProps> = ({
             </span>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ color: "var(--text-secondary)" }}>Protection Level:</span>
+            <span
+              style={{
+                fontSize: "11px",
+                fontWeight: "700",
+                padding: "2px 8px",
+                borderRadius: "var(--radius-sm)",
+                backgroundColor:
+                  file.protection_status === "parity"
+                    ? "rgba(16, 185, 129, 0.12)"
+                    : file.protection_status === "mirrored"
+                    ? "rgba(6, 182, 212, 0.12)"
+                    : "rgba(245, 158, 11, 0.12)",
+                color:
+                  file.protection_status === "parity"
+                    ? "#10b981"
+                    : file.protection_status === "mirrored"
+                    ? "#06b6d4"
+                    : "#f59e0b",
+                border: `1px solid ${
+                  file.protection_status === "parity"
+                    ? "rgba(16, 185, 129, 0.3)"
+                    : file.protection_status === "mirrored"
+                    ? "rgba(6, 182, 212, 0.3)"
+                    : "rgba(245, 158, 11, 0.3)"
+                }`,
+              }}
+            >
+              {file.protection_label ||
+                (file.protection_status === "parity"
+                  ? "Parity-protected"
+                  : file.protection_status === "mirrored"
+                  ? "Mirrored (2x copies)"
+                  : "Unprotected (single drive)")}
+            </span>
+          </div>
+          {file.unprotected_reason && (
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px" }}>
+              <span style={{ color: "var(--text-secondary)" }}>Reason:</span>
+              <span style={{ color: "#f59e0b", fontWeight: "500", textAlign: "right", maxWidth: "60%" }}>
+                {file.unprotected_reason}
+              </span>
+            </div>
+          )}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span style={{ color: "var(--text-secondary)" }}>Storage Mode:</span>
             <span
               style={{
@@ -113,7 +158,11 @@ export const FileDetailsDrawer: React.FC<FileDetailsDrawerProps> = ({
                 border: "1px solid var(--border-strong)",
               }}
             >
-              {file.storage_mode === "whole" ? "Whole Object (AES-256-GCM)" : "Chunked + XOR Parity"}
+              {file.storage_mode === "whole"
+                ? "Whole Object (AES-256-GCM)"
+                : file.storage_mode === "mirrored"
+                ? "Mirrored (2x Chunks)"
+                : "Chunked + XOR Parity"}
             </span>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>

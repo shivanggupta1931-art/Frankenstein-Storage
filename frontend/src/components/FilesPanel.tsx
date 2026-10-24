@@ -15,6 +15,10 @@ import {
   ArrowDownWideNarrow,
   ArrowUpNarrowWide,
   X,
+  ShieldCheck,
+  ShieldAlert,
+  Shield,
+  RefreshCw,
 } from "lucide-react";
 import { StoredFile, Drive } from "../types";
 import { formatBytes, formatDate } from "../utils/format";
@@ -30,6 +34,8 @@ interface FilesPanelProps {
   onDeleteFile: (file: StoredFile) => void;
   onSelectFile: (file: StoredFile) => void;
   onPreviewFile: (file: StoredFile) => void;
+  onReprotectFile?: (fileId: string) => Promise<void> | void;
+  onReprotectAll?: () => Promise<void> | void;
   uploadProgress: number | null;
 }
 
@@ -51,6 +57,8 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({
   onDeleteFile,
   onSelectFile,
   onPreviewFile,
+  onReprotectFile,
+  onReprotectAll,
   uploadProgress,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
@@ -60,6 +68,17 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({
     return (localStorage.getItem("frankenstein_file_sort") as SortOption) || "date_desc";
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const unprotectedCount = useMemo(
+    () =>
+      files.filter(
+        (f) =>
+          (f.protection_status ||
+            (f.storage_mode === "chunked_parity" ? "parity" : "unprotected")) ===
+          "unprotected"
+      ).length,
+    [files]
+  );
 
   const handleSortChange = (newSort: SortOption) => {
     setSortOption(newSort);
@@ -153,6 +172,32 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          {/* Re-protect All button (shows when unprotected files exist) */}
+          {unprotectedCount > 0 && onReprotectAll && (
+            <button
+              className="btn-interactive"
+              onClick={() => onReprotectAll()}
+              disabled={!unlocked || uploadProgress !== null}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "5px",
+                padding: "6px 12px",
+                backgroundColor: "rgba(245, 158, 11, 0.12)",
+                border: "1px solid rgba(245, 158, 11, 0.35)",
+                color: "#f59e0b",
+                fontWeight: "600",
+                fontSize: "12px",
+                borderRadius: "var(--radius-md)",
+                opacity: !unlocked || uploadProgress !== null ? 0.5 : 1,
+              }}
+              title="Re-protect all single-copy files across available drives"
+            >
+              <RefreshCw size={13} />
+              <span>Re-protect All ({unprotectedCount})</span>
+            </button>
+          )}
+
           {/* Overwrite toggle */}
           <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "var(--text-secondary)", cursor: "pointer", userSelect: "none" }}>
             <input
@@ -224,7 +269,7 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({
             : "Unlock storage vault above to upload and manage files"}
         </div>
         <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>
-          Files &ge; 1 MiB chunked with rotating XOR parity • Files &lt; 1 MiB stored whole
+          3+ drives: XOR Parity (&ge;1 MiB) &amp; 2x Mirrored (&lt;1 MiB) • 2 drives: 2x Mirrored • 1 drive: Unprotected
         </div>
       </div>
 
@@ -471,9 +516,13 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({
         )}
 
         {sortedFiles.map((file) => {
-          const isHealthy = file.health === "Healthy";
-          const isRebuilt = file.health === "Rebuilt from parity";
-          const isUnavailable = file.health === "Unavailable";
+          const isHealthy = !file.health || file.health === "Healthy";
+          const isDegraded = Boolean(
+            file.health?.includes("Degraded") || file.health === "Rebuilt from parity"
+          );
+          const isUnavailable = Boolean(
+            file.health?.includes("Unavailable") || file.health?.includes("unrecoverable")
+          );
           const chunks = file.chunks || [];
 
           return (
@@ -528,67 +577,151 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({
                           letterSpacing: "0.03em",
                           backgroundColor: isHealthy
                             ? "var(--status-online-bg)"
-                            : isRebuilt
-                            ? "var(--status-warning-bg)"
-                            : "var(--status-offline-bg)",
+                            : isDegraded
+                              ? "var(--status-warning-bg)"
+                              : "var(--status-offline-bg)",
                           border: `1px solid ${
                             isHealthy
                               ? "var(--status-online)"
-                              : isRebuilt
-                              ? "var(--status-warning)"
-                              : "var(--status-offline)"
+                              : isDegraded
+                                ? "var(--status-warning)"
+                                : "var(--status-offline)"
                           }`,
                           color: isHealthy
                             ? "var(--status-online-text)"
-                            : isRebuilt
-                            ? "var(--status-warning-text)"
-                            : "var(--status-offline-text)",
+                            : isDegraded
+                              ? "var(--status-warning-text)"
+                              : "var(--status-offline-text)",
                         }}
+                        title={
+                          isDegraded
+                            ? "Drive offline in stripe. File remains fully readable via XOR parity / mirror reconstruction."
+                            : isUnavailable
+                            ? "2 or more drives are offline. Data is unrecoverable until drives return."
+                            : "All chunks healthy and online."
+                        }
                       >
                         {isHealthy && <CheckCircle2 size={11} />}
-                        {isRebuilt && <AlertTriangle size={11} />}
+                        {isDegraded && <AlertTriangle size={11} />}
                         {isUnavailable && <XCircle size={11} />}
-                        <span>{file.health || "Healthy"}</span>
+                        <span>{file.health || "HEALTHY"}</span>
                       </span>
 
-                      {/* Storage mode badge - solid colors */}
-                      <span
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          padding: "2px 6px",
-                          borderRadius: "var(--radius-sm)",
-                          fontSize: "10px",
-                          fontWeight: "700",
-                          backgroundColor:
-                            file.storage_mode === "whole"
-                              ? "var(--bg-base)"
-                              : "var(--bg-surface-active)",
-                          color:
-                            file.storage_mode === "whole"
-                              ? "var(--text-secondary)"
-                              : "var(--accent-cyan-light)",
-                          border: `1px solid ${
-                            file.storage_mode === "whole"
-                              ? "var(--border-strong)"
-                              : "var(--accent-cyan-solid)"
-                          }`,
-                        }}
-                      >
-                        {file.storage_mode === "whole" ? "WHOLE" : "XOR PARITY"}
-                      </span>
+                      {/* Real Protection level badge */}
+                      {(() => {
+                        const prot =
+                          file.protection_status ||
+                          (file.storage_mode === "chunked_parity" ? "parity" : "unprotected");
+                        if (prot === "parity") {
+                          return (
+                            <span
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "4px",
+                                padding: "2px 7px",
+                                borderRadius: "var(--radius-sm)",
+                                fontSize: "10px",
+                                fontWeight: "700",
+                                backgroundColor: "rgba(16, 185, 129, 0.12)",
+                                color: "#10b981",
+                                border: "1px solid rgba(16, 185, 129, 0.35)",
+                              }}
+                              title="Parity-protected: striped with rotating XOR parity across 3+ drives. Survives 1 drive failure."
+                            >
+                              <ShieldCheck size={11} />
+                              <span>PARITY-PROTECTED</span>
+                            </span>
+                          );
+                        } else if (prot === "mirrored") {
+                          return (
+                            <span
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "4px",
+                                padding: "2px 7px",
+                                borderRadius: "var(--radius-sm)",
+                                fontSize: "10px",
+                                fontWeight: "700",
+                                backgroundColor: "rgba(139, 92, 246, 0.12)",
+                                color: "#a78bfa",
+                                border: "1px solid rgba(139, 92, 246, 0.35)",
+                              }}
+                              title="Mirrored: full copies stored across 2 distinct drives. Survives 1 drive failure."
+                            >
+                              <Shield size={11} />
+                              <span>MIRRORED</span>
+                            </span>
+                          );
+                        } else {
+                          return (
+                            <span
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "4px",
+                                padding: "2px 7px",
+                                borderRadius: "var(--radius-sm)",
+                                fontSize: "10px",
+                                fontWeight: "700",
+                                backgroundColor: "rgba(245, 158, 11, 0.12)",
+                                color: "#f59e0b",
+                                border: "1px solid rgba(245, 158, 11, 0.35)",
+                              }}
+                              title={
+                                file.unprotected_reason
+                                  ? `Unprotected: ${file.unprotected_reason}`
+                                  : "Unprotected: single drive copy. Will not survive drive failure."
+                              }
+                            >
+                              <ShieldAlert size={11} />
+                              <span>UNPROTECTED</span>
+                            </span>
+                          );
+                        }
+                      })()}
                     </div>
 
                     <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>
-                      {file.storage_mode === "whole"
-                        ? `${formatBytes(file.size)} • 1 object on ${chunks[0]?.drive_name || "drive"} • Uploaded ${formatDate(file.created_at)}`
-                        : `${formatBytes(file.size)} • ${chunks.length} chunks (${Math.ceil(chunks.length / 3)} stripes) • Uploaded ${formatDate(file.created_at)}`}
+                      {file.protection_status === "parity"
+                        ? `${formatBytes(file.size)} • ${chunks.length} chunks (${Math.ceil(chunks.length / 3)} stripes) with XOR parity • Uploaded ${formatDate(file.created_at)}`
+                        : file.protection_status === "mirrored"
+                        ? `${formatBytes(file.size)} • ${chunks.length} chunks (2x mirrored) • Uploaded ${formatDate(file.created_at)}`
+                        : `${formatBytes(file.size)} • 1 copy on ${chunks[0]?.drive_name || "drive"}${file.unprotected_reason ? ` (${file.unprotected_reason})` : ""} • Uploaded ${formatDate(file.created_at)}`}
                     </div>
                   </div>
                 </div>
 
                 {/* Actions */}
                 <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  {/* Re-protect button for unprotected files */}
+                  {(file.protection_status || (file.storage_mode === "chunked_parity" ? "parity" : "unprotected")) === "unprotected" && onReprotectFile && (
+                    <button
+                      className="btn-interactive"
+                      onClick={() => onReprotectFile(file.id)}
+                      disabled={!unlocked}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "4px",
+                        padding: "5px 9px",
+                        backgroundColor: "rgba(245, 158, 11, 0.12)",
+                        border: "1px solid rgba(245, 158, 11, 0.35)",
+                        borderRadius: "var(--radius-sm)",
+                        fontSize: "11px",
+                        fontWeight: "600",
+                        color: "#f59e0b",
+                        opacity: !unlocked ? 0.4 : 1,
+                      }}
+                      title="Upgrade to Parity or Mirrored protection using available online drives"
+                      aria-label={`Re-protect file ${file.name}`}
+                    >
+                      <RefreshCw size={12} />
+                      <span>Re-protect</span>
+                    </button>
+                  )}
+
                   <button
                     className="btn-interactive"
                     onClick={() => onSelectFile(file)}

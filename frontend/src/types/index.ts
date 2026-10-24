@@ -12,10 +12,15 @@ export interface Drive {
   display_name: string;
   path: string;
   provider_type?: "local" | "gdrive";
-  status: "online" | "simulated_offline" | "unavailable";
+  status: "online" | "simulated_offline" | "unavailable" | "low_space";
   simulated_offline: boolean;
   available: boolean;
   usage: DriveUsage;
+  reserve_bytes?: number;
+  effective_free?: number;
+  is_low_space?: boolean;
+  is_placement_eligible?: boolean;
+  exclusion_reason?: string | null;
   chunk_count: number;
   chunks_total_bytes: number;
   shared_device?: boolean;
@@ -46,8 +51,11 @@ export interface StoredFile {
   size: number;
   sha256: string;
   status: "uploading" | "complete" | "failed";
-  health?: "Healthy" | "Rebuilt from parity" | "Unavailable";
-  storage_mode?: "whole" | "chunked_parity";
+  health?: "Healthy" | "Rebuilt from parity" | "Degraded" | "Unavailable";
+  storage_mode?: "whole" | "chunked_parity" | "parity" | "mirrored" | "unprotected";
+  protection_status?: "parity" | "mirrored" | "unprotected";
+  protection_label?: string;
+  unprotected_reason?: string | null;
   total_chunks?: number;
   chunks?: Chunk[];
   created_at: string;
@@ -56,12 +64,30 @@ export interface StoredFile {
 
 export interface UploadPreference {
   user_id: string;
-  preferred_mode: "whole" | "chunked_parity" | null;
+  preferred_mode: "whole" | "chunked_parity" | "mirrored" | null;
   updated_at?: string;
   threshold_bytes: number;
 }
 
 export interface PoolOverview {
+  // Three honest figures
+  raw_capacity?: number;
+  raw_free?: number;
+  usable_capacity?: number;
+  free_usable_space?: number;
+
+  // Tooltip descriptions
+  raw_capacity_description?: string;
+  usable_capacity_description?: string;
+  free_usable_space_description?: string;
+
+  // Pool redundancy & drive health
+  redundancy_mode?: string;
+  redundancy_label?: string;
+  redundancy_efficiency?: number;
+  drives_eligible?: number;
+
+  // Legacy / backward-compatible properties
   pooled_capacity: number;
   pooled_used: number;
   pooled_free: number;

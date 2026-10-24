@@ -6,6 +6,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from backend.app.core.config import settings
 from backend.app.core.errors import AppError
 from backend.app.providers.base import StorageProvider
 from backend.app.providers.gdrive import GoogleDriveProvider
@@ -46,13 +47,31 @@ def list_drives(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         usage = provider.get_usage()
         dev_info = provider.get_device_info() if hasattr(provider, "get_device_info") else {}
 
-        # Determine status string
+        total_bytes = int(usage.get("total", 0))
+        free_bytes = int(usage.get("free", 0))
+        reserve_bytes = settings.calculate_reserve(total_bytes)
+        effective_free = max(0, free_bytes - reserve_bytes)
+        is_low_space = bool(free_bytes < reserve_bytes)
+
+        # Determine status string and placement eligibility
         if row["simulated_offline"]:
             effective_status = "simulated_offline"
+            exclusion_reason = "Offline (Simulated)"
+            is_eligible = False
         elif not avail:
             effective_status = "unavailable"
+            exclusion_reason = "Offline (Storage path unreachable)"
+            is_eligible = False
+        elif is_low_space:
+            effective_status = "low_space"
+            res_gib = round(reserve_bytes / (1024 ** 3), 1)
+            free_gib = round(free_bytes / (1024 ** 3), 2)
+            exclusion_reason = f"Low space: {free_gib} GiB free is below {res_gib} GiB reserve"
+            is_eligible = False
         else:
             effective_status = "online"
+            exclusion_reason = None
+            is_eligible = True
 
         # Count active chunks on this drive
         chunk_cursor = conn.cursor()
@@ -79,6 +98,11 @@ def list_drives(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             "simulated_offline": bool(row["simulated_offline"]),
             "available": avail,
             "usage": usage,
+            "reserve_bytes": reserve_bytes,
+            "effective_free": effective_free,
+            "is_low_space": is_low_space,
+            "is_placement_eligible": is_eligible,
+            "exclusion_reason": exclusion_reason,
             "chunk_count": chunk_stat["count"],
             "chunks_total_bytes": chunk_stat["total_size"],
             "device_id": dev_info.get("device_id"),
@@ -110,58 +134,110 @@ def list_drives(conn: sqlite3.Connection) -> list[dict[str, Any]]:
 
 
 def calculate_pooled_overview(conn: sqlite3.Connection, drives: list[dict[str, Any]]) -> dict[str, Any]:
-    """Calculates storage overview, grouping drives by physical st_dev / device_id to avoid overcounting."""
+    """Calculates storage overview with honest figures: Raw capacity, Usable capacity, and Free usable space."""
     device_capacities: dict[str, int] = {}
     device_free: dict[str, int] = {}
     device_used: dict[str, int] = {}
 
+    eligible_device_capacities: dict[str, int] = {}
+    eligible_device_effective_free: dict[str, int] = {}
+
     for d in drives:
-        if not d.get("available"):
-            continue
         dev_id = d.get("device_id") or f"untracked_{d['id']}"
         usage = d.get("usage", {})
         total = int(usage.get("total", 0))
         free = int(usage.get("free", 0))
         used = int(usage.get("used", 0))
+        effective_free = int(d.get("effective_free", 0))
+        is_eligible = bool(d.get("is_placement_eligible", False))
 
+        # Raw hardware metrics (de-duplicated across folders sharing the same volume)
         if dev_id not in device_capacities:
             device_capacities[dev_id] = total
             device_free[dev_id] = free
             device_used[dev_id] = used
         else:
-            # Multiple folders on the same volume share capacity and free space
             device_free[dev_id] = min(device_free[dev_id], free)
             device_capacities[dev_id] = max(device_capacities[dev_id], total)
 
-    pooled_cap = sum(device_capacities.values())
-    pooled_free = sum(device_free.values())
+        # Eligible online metrics (only counting online drives above reserve)
+        if is_eligible:
+            if dev_id not in eligible_device_capacities:
+                eligible_device_capacities[dev_id] = total
+                eligible_device_effective_free[dev_id] = effective_free
+            else:
+                eligible_device_effective_free[dev_id] = min(eligible_device_effective_free[dev_id], effective_free)
+                eligible_device_capacities[dev_id] = max(eligible_device_capacities[dev_id], total)
+
+    raw_capacity = sum(device_capacities.values())
+    raw_free = sum(device_free.values())
     physical_disk_used = sum(device_used.values())
+
+    eligible_count = sum(1 for d in drives if d.get("is_placement_eligible"))
+    online_count = sum(1 for d in drives if d.get("status") in ("online", "low_space"))
+
+    # Determine pool redundancy and usable capacity
+    if eligible_count >= 3:
+        redundancy_mode = "parity"
+        redundancy_label = "Rotating XOR Parity (3+ drives)"
+        efficiency = 2.0 / 3.0
+    elif eligible_count == 2:
+        redundancy_mode = "mirrored"
+        redundancy_label = "Mirrored Redundancy (2 drives)"
+        efficiency = 0.5
+    elif eligible_count == 1:
+        redundancy_mode = "unprotected"
+        redundancy_label = "Unprotected (1 drive)"
+        efficiency = 1.0
+    else:
+        redundancy_mode = "none"
+        redundancy_label = "No eligible online storage"
+        efficiency = 0.0
+
+    usable_capacity = int(sum(eligible_device_capacities.values()) * efficiency)
+    free_usable_space = int(sum(eligible_device_effective_free.values()) * efficiency)
 
     # Vault chunks stored in database
     cursor = conn.cursor()
     cursor.execute("SELECT COALESCE(SUM(size), 0) AS total_chunks_bytes FROM chunks")
     vault_chunks_bytes = cursor.fetchone()["total_chunks_bytes"]
 
-    # Pooled used is bounded by pooled capacity and represents vault data
-    pooled_used = min(vault_chunks_bytes, pooled_cap)
+    # Pooled used represents vault chunks stored
+    pooled_used = min(vault_chunks_bytes, usable_capacity) if usable_capacity > 0 else vault_chunks_bytes
 
     cursor.execute("SELECT COUNT(*) AS count, COALESCE(SUM(size), 0) AS total_size FROM files WHERE status = 'complete'")
     file_stat = cursor.fetchone()
 
-    online_count = sum(1 for d in drives if d.get("status") == "online")
-
     return {
-        "pooled_capacity": pooled_cap,
-        "pooled_used": pooled_used,
-        "pooled_free": pooled_free,
-        "vault_chunks_bytes": vault_chunks_bytes,
-        "physical_disk_used": physical_disk_used,
-        "physical_disk_capacity": pooled_cap,
-        "physical_disk_free": pooled_free,
-        "capacity_source": "Provider-reported (De-duplicated)",
+        # The Three Honest Figures
+        "raw_capacity": raw_capacity,
+        "raw_free": raw_free,
+        "usable_capacity": usable_capacity,
+        "free_usable_space": free_usable_space,
+
+        # Calculation Tooltip Explanations
+        "raw_capacity_description": "Total physical storage across all registered drives (de-duplicated across shared Mac/APFS volumes).",
+        "usable_capacity_description": f"Actual usable capacity available for encrypted files after {redundancy_label} overhead and reserves.",
+        "free_usable_space_description": f"Real free space available for new file uploads after 2 GiB / 5% reserves and {round((1.0 - efficiency) * 100)}% redundancy overhead.",
+
+        # Redundancy & Drive Counts
+        "redundancy_mode": redundancy_mode,
+        "redundancy_label": redundancy_label,
+        "redundancy_efficiency": efficiency,
         "drives_count": len(drives),
         "drives_online": online_count,
+        "drives_eligible": eligible_count,
         "drives_ratio": f"{online_count} of {len(drives)}",
+
+        # Backward compatibility for existing UI components and tests
+        "pooled_capacity": raw_capacity,
+        "pooled_used": pooled_used,
+        "pooled_free": raw_free,
+        "vault_chunks_bytes": vault_chunks_bytes,
+        "physical_disk_used": physical_disk_used,
+        "physical_disk_capacity": raw_capacity,
+        "physical_disk_free": raw_free,
+        "capacity_source": "Provider-reported (De-duplicated)",
         "files_count": file_stat["count"],
         "files_total_bytes": file_stat["total_size"],
     }
@@ -325,7 +401,10 @@ def add_drive(
             config_obj["folder_url"] = raw_path
 
         if "auth_type" not in config_obj:
-            config_obj["auth_type"] = "demo_mock"
+            if config_obj.get("access_token") or config_obj.get("refresh_token"):
+                config_obj["auth_type"] = "access_token"
+            else:
+                config_obj["auth_type"] = "demo_mock"
         if "folder_name" not in config_obj:
             config_obj["folder_name"] = clean_name
 

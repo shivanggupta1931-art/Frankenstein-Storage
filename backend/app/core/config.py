@@ -28,6 +28,10 @@ class Settings:
         self.min_drives: int = int(os.getenv("MIN_DRIVES", "3"))
         self.smart_upload_threshold_bytes: int = int(os.getenv("SMART_UPLOAD_THRESHOLD_BYTES", str(1024 * 1024)))
         
+        # Drive safety reserve constraints (default: keep at least 2 GiB or 5% free, whichever is larger)
+        self.min_reserve_bytes: int = int(os.getenv("MIN_RESERVE_BYTES", str(2 * 1024 * 1024 * 1024)))
+        self.min_reserve_ratio: float = float(os.getenv("MIN_RESERVE_RATIO", "0.05"))
+
         # Security constraints
         self.allowed_hosts = {
             "127.0.0.1",
@@ -55,5 +59,17 @@ class Settings:
             self.session_token: str = secrets.token_urlsafe(32)
             self.is_ephemeral_token: bool = True
 
+    def calculate_reserve(self, total_bytes: int) -> int:
+        if total_bytes <= 0:
+            return 0
+        ratio_bytes = int(total_bytes * self.min_reserve_ratio)
+        raw_reserve = max(self.min_reserve_bytes, ratio_bytes)
+        # Cap at 50% for very small test/virtual drives
+        return min(raw_reserve, int(total_bytes * 0.5))
+
 
 settings = Settings()
+
+
+def calculate_reserve(total_bytes: int) -> int:
+    return settings.calculate_reserve(total_bytes)

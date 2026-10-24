@@ -25,6 +25,11 @@ def test_env(tmp_path: Path):
     orig_chunk_size = settings.chunk_size_bytes
     settings.chunk_size_bytes = 64 * 1024  # 64 KB chunks for snappy test execution
 
+    orig_reserve_bytes = settings.min_reserve_bytes
+    orig_reserve_ratio = settings.min_reserve_ratio
+    settings.min_reserve_bytes = 1024 * 1024  # 1 MB in tests
+    settings.min_reserve_ratio = 0.0001
+
     # Run migrations
     run_migrations(db_path=db_file)
 
@@ -60,6 +65,8 @@ def test_env(tmp_path: Path):
     finally:
         key_manager.lock()
         settings.chunk_size_bytes = orig_chunk_size
+        settings.min_reserve_bytes = orig_reserve_bytes
+        settings.min_reserve_ratio = orig_reserve_ratio
         conn.close()
 
 

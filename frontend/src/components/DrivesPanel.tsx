@@ -13,6 +13,7 @@ import {
   FolderPlus,
   Compass,
   RefreshCw,
+  AlertTriangle,
 } from "lucide-react";
 import { Drive } from "../types";
 import { formatBytes, getDriveColor } from "../utils/format";
@@ -961,6 +962,42 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
                           title={`Shares underlying physical storage volume (${drive.shared_volume_name || 'Physical APFS Volume'}) with ${drive.shared_device_count} drives`}
                         >
                           SHARED VOLUME ({drive.shared_device_count})
+                        </span>
+                      )}
+                      {drive.exclusion_reason && (
+                        <span
+                          style={{
+                            fontSize: "9px",
+                            fontWeight: "700",
+                            padding: "1px 6px",
+                            backgroundColor: "rgba(239, 68, 68, 0.12)",
+                            color: "#ef4444",
+                            border: "1px solid rgba(239, 68, 68, 0.35)",
+                            borderRadius: "var(--radius-sm)",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "3px",
+                          }}
+                          title={`Excluded from placement: ${drive.exclusion_reason}`}
+                        >
+                          <AlertTriangle size={10} />
+                          <span>{drive.exclusion_reason.includes("Low space") ? "LOW SPACE (EXCLUDED)" : drive.exclusion_reason.toUpperCase()}</span>
+                        </span>
+                      )}
+                      {pct >= 90 && (
+                        <span
+                          style={{
+                            fontSize: "9px",
+                            fontWeight: "700",
+                            padding: "1px 6px",
+                            backgroundColor: "rgba(245, 158, 11, 0.12)",
+                            color: "#f59e0b",
+                            border: "1px solid rgba(245, 158, 11, 0.35)",
+                            borderRadius: "var(--radius-sm)",
+                          }}
+                          title="Drive usage is above 90% threshold"
+                        >
+                          &gt;90% USED
                         </span>
                       )}
                     </div>

@@ -109,4 +109,5 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         if origin:
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Expose-Headers"] = "Content-Disposition, Content-Length, X-File-SHA256, X-Rebuilt-From-Parity"
         return response

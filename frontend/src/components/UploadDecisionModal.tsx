@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { formatBytes } from "../utils/format";
 
-export type StorageMode = "whole" | "chunked_parity";
+export type StorageMode = "whole" | "chunked_parity" | "mirrored";
 
 interface UploadDecisionModalProps {
   isOpen: boolean;

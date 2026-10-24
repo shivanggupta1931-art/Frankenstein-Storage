@@ -34,14 +34,20 @@ export const PoolOverview: React.FC<PoolOverviewProps> = ({ overview, loading })
     );
   }
 
-  const cap = overview?.pooled_capacity || 0;
-  const used = overview?.pooled_used || 0;
-  const free = overview?.pooled_free || 0;
-  const usedPct = cap > 0 ? Math.min(100, Math.round((used / cap) * 100)) : 0;
+  const rawCap = overview?.raw_capacity || overview?.pooled_capacity || 0;
+  const usableCap = overview?.usable_capacity || 0;
+  const freeUsable = overview?.free_usable_space ?? overview?.pooled_free ?? 0;
+  const vaultUsed = overview?.vault_chunks_bytes ?? overview?.pooled_used ?? 0;
+  const usedPct = usableCap > 0 ? Math.min(100, Math.round((vaultUsed / usableCap) * 100)) : 0;
   const drivesOnline = overview?.drives_online || 0;
   const drivesTotal = overview?.drives_count || 0;
-  const isHealthy = drivesTotal >= 3 && drivesOnline === drivesTotal;
-  const isDegraded = drivesTotal >= 3 && drivesOnline === drivesTotal - 1;
+  const drivesEligible = overview?.drives_eligible ?? drivesOnline;
+  
+  const redundancyMode = overview?.redundancy_mode || (drivesOnline >= 3 ? "parity" : drivesOnline === 2 ? "mirrored" : "unprotected");
+  const redundancyLabel = overview?.redundancy_label || (redundancyMode === "parity" ? "Parity-protected" : redundancyMode === "mirrored" ? "Mirrored" : "Unprotected");
+  
+  const isHealthy = drivesTotal >= 2 && drivesOnline === drivesTotal && drivesEligible >= 2;
+  const isDegraded = drivesTotal >= 2 && drivesOnline < drivesTotal && drivesOnline >= (redundancyMode === "parity" ? 2 : 1);
 
   return (
     <section
@@ -49,14 +55,15 @@ export const PoolOverview: React.FC<PoolOverviewProps> = ({ overview, loading })
       className="animate-slide-up"
       style={{
         display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))",
-        gap: "16px",
+        gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
+        gap: "14px",
         padding: "20px 28px 12px",
       }}
     >
-      {/* 1. Pooled Capacity Card */}
+      {/* 1. Usable Capacity Card (Honest Figure 1) */}
       <div
         className="card-interactive"
+        title={overview?.usable_capacity_description || "Actual usable capacity available for encrypted files after redundancy overhead and reserves."}
         style={{
           backgroundColor: "var(--bg-surface)",
           border: "1px solid var(--border-subtle)",
@@ -66,37 +73,39 @@ export const PoolOverview: React.FC<PoolOverviewProps> = ({ overview, loading })
           flexDirection: "column",
           gap: "6px",
           boxShadow: "var(--shadow-sm)",
+          position: "relative",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-            Total Capacity
+          <span style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            Usable Capacity
           </span>
           <span
             style={{
               fontSize: "11px",
               fontWeight: "600",
               padding: "2px 8px",
-              backgroundColor: "var(--bg-surface-elevated)",
-              border: "1px solid var(--border-strong)",
+              backgroundColor: "rgba(16, 185, 129, 0.12)",
+              border: "1px solid rgba(16, 185, 129, 0.3)",
               borderRadius: "var(--radius-full)",
-              color: "var(--text-secondary)",
+              color: "#10b981",
             }}
           >
-            Unified Pool
+            Honest Pool
           </span>
         </div>
         <div style={{ fontSize: "24px", fontWeight: "700", fontFamily: "var(--font-mono)", color: "var(--text-primary)", letterSpacing: "-0.02em" }}>
-          {formatBytes(cap)}
+          {formatBytes(usableCap)}
         </div>
         <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>
-          <span style={{ color: "var(--text-secondary)", fontWeight: "500" }}>{formatBytes(free)}</span> free across {drivesTotal} drives (De-duplicated)
+          {redundancyLabel} (after reserves & overhead)
         </div>
       </div>
 
-      {/* 2. Pool Space Used Card */}
+      {/* 2. Free Usable Space Card (Honest Figure 2) */}
       <div
         className="card-interactive"
+        title={overview?.free_usable_space_description || "Real free space available for file uploads after 2 GiB/5% reserve and redundancy overhead."}
         style={{
           backgroundColor: "var(--bg-surface)",
           border: "1px solid var(--border-subtle)",
@@ -109,8 +118,8 @@ export const PoolOverview: React.FC<PoolOverviewProps> = ({ overview, loading })
         }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-            Vault Storage Used
+          <span style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            Free Usable Space
           </span>
           <span
             style={{
@@ -124,42 +133,59 @@ export const PoolOverview: React.FC<PoolOverviewProps> = ({ overview, loading })
               color: "var(--accent-cyan-solid)",
             }}
           >
-            {usedPct}%
+            Available
           </span>
         </div>
         <div style={{ fontSize: "24px", fontWeight: "700", fontFamily: "var(--font-mono)", color: "var(--text-primary)", letterSpacing: "-0.02em" }}>
-          {formatBytes(overview?.vault_chunks_bytes ?? used)}
+          {formatBytes(freeUsable)}
         </div>
-        <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>
-          {overview?.physical_disk_used ? (
-            <span>Host disk used: {formatBytes(overview.physical_disk_used)}</span>
-          ) : (
-            <span>Actual encrypted vault chunks stored</span>
-          )}
-        </div>
-        {/* Crisp solid progress bar */}
-        <div
-          style={{
-            height: "5px",
-            backgroundColor: "var(--bg-surface-elevated)",
-            borderRadius: "var(--radius-full)",
-            overflow: "hidden",
-            marginTop: "6px",
-          }}
-        >
-          <div
-            style={{
-              height: "100%",
-              width: `${usedPct}%`,
-              backgroundColor: "var(--accent-cyan-solid)",
-              borderRadius: "var(--radius-full)",
-              transition: "width 400ms cubic-bezier(0.16, 1, 0.3, 1)",
-            }}
-          />
+        <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+          Raw physical free: <span style={{ color: "var(--text-secondary)", fontWeight: "500" }}>{formatBytes(overview?.raw_free ?? overview?.pooled_free ?? 0)}</span>
         </div>
       </div>
 
-      {/* 3. Drives Online Card */}
+      {/* 3. Raw Capacity Card (Honest Figure 3) */}
+      <div
+        className="card-interactive"
+        title={overview?.raw_capacity_description || "Total physical storage across all registered drives (de-duplicated across shared Mac volumes)."}
+        style={{
+          backgroundColor: "var(--bg-surface)",
+          border: "1px solid var(--border-subtle)",
+          borderRadius: "var(--radius-lg)",
+          padding: "18px 20px",
+          display: "flex",
+          flexDirection: "column",
+          gap: "6px",
+          boxShadow: "var(--shadow-sm)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            Raw Physical Disk
+          </span>
+          <span
+            style={{
+              fontSize: "11px",
+              fontWeight: "600",
+              padding: "2px 8px",
+              backgroundColor: "var(--bg-surface-elevated)",
+              border: "1px solid var(--border-strong)",
+              borderRadius: "var(--radius-full)",
+              color: "var(--text-muted)",
+            }}
+          >
+            De-duplicated
+          </span>
+        </div>
+        <div style={{ fontSize: "24px", fontWeight: "700", fontFamily: "var(--font-mono)", color: "var(--text-primary)", letterSpacing: "-0.02em" }}>
+          {formatBytes(rawCap)}
+        </div>
+        <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+          {drivesTotal} drives registered ({drivesEligible} placement-eligible)
+        </div>
+      </div>
+
+      {/* 4. Drives & Protection Status Card */}
       <div
         className="card-interactive"
         style={{
@@ -174,8 +200,8 @@ export const PoolOverview: React.FC<PoolOverviewProps> = ({ overview, loading })
         }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-            Drives Status
+          <span style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            Pool Protection
           </span>
           <span
             style={{
@@ -192,18 +218,18 @@ export const PoolOverview: React.FC<PoolOverviewProps> = ({ overview, loading })
               color: isHealthy ? "var(--status-online-text)" : isDegraded ? "var(--status-warning-text)" : "var(--status-offline-text)",
             }}
           >
-            {isHealthy ? "Healthy" : isDegraded ? "Degraded" : "At Risk"}
+            {isHealthy ? "Protected" : isDegraded ? "Degraded" : "At Risk"}
           </span>
         </div>
         <div style={{ fontSize: "24px", fontWeight: "700", fontFamily: "var(--font-mono)", color: "var(--text-primary)", letterSpacing: "-0.02em" }}>
-          {overview?.drives_ratio || "0 of 0"}
+          {redundancyLabel}
         </div>
         <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>
-          {drivesOnline >= 3 ? "XOR parity active across online drives" : "Requires 3+ drives for XOR parity"}
+          {drivesOnline} of {drivesTotal} online ({drivesEligible} eligible above reserve)
         </div>
       </div>
 
-      {/* 4. Files Stored Card */}
+      {/* 5. Objects & Vault Chunks Card */}
       <div
         className="card-interactive"
         style={{
@@ -218,8 +244,8 @@ export const PoolOverview: React.FC<PoolOverviewProps> = ({ overview, loading })
         }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-            Objects
+          <span style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            Vault Storage
           </span>
           <span
             style={{
@@ -229,17 +255,17 @@ export const PoolOverview: React.FC<PoolOverviewProps> = ({ overview, loading })
               backgroundColor: "var(--bg-surface-elevated)",
               border: "1px solid var(--border-strong)",
               borderRadius: "var(--radius-full)",
-              color: "var(--text-secondary)",
+              color: "var(--accent-cyan-solid)",
             }}
           >
-            AES-256-GCM
+            {usedPct}% used
           </span>
         </div>
         <div style={{ fontSize: "24px", fontWeight: "700", fontFamily: "var(--font-mono)", color: "var(--text-primary)", letterSpacing: "-0.02em" }}>
-          {overview?.files_count || 0}
+          {formatBytes(vaultUsed)}
         </div>
         <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>
-          Payload: <span style={{ color: "var(--text-secondary)", fontWeight: "500" }}>{formatBytes(overview?.files_total_bytes || 0)}</span>
+          {overview?.files_count || 0} encrypted file(s) ({formatBytes(overview?.files_total_bytes || 0)} payload)
         </div>
       </div>
     </section>
