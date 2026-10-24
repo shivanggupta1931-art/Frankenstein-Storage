@@ -1,0 +1,24 @@
+# Architecture & Design Decisions
+
+- 2026-10-23: Workspace root represents repository root; backend, frontend, docs, scripts placed at top level.
+- 2026-10-23: SQLite configured in WAL mode with foreign keys enabled on every connection.
+- 2026-10-23: Token auth uses bearer token generated at startup via secrets.token_urlsafe(32) and logged once to stderr/stdout.
+- 2026-10-23: Key derivation uses scrypt with 32-byte salt and N=16384, r=8, p=1 to derive AES-256 key; verifier uses HMAC-SHA256 of static token.
+- 2026-10-23: Chunks stored with 12-byte random nonce prefixed to AES-256-GCM ciphertext and 16-byte tag.
+- 2026-10-23: Rotating XOR parity computes parity across equal-length encrypted chunks per stripe with parity index = stripe_index % 3.
+- 2026-10-23: Local storage paths restricted strictly to `<drive_root>/.frankenstein/chunks/ab/cd/<chunk_id>` with path traversal and symlink escape checks.
+- 2026-10-23: Stream upload and download via chunk buffers without buffering full files in RAM.
+- 2026-10-23: Error envelope standardized across all endpoints with format {"error": {"code", "message", "details"}}.
+- 2026-10-23: Frontend implemented as single-page 3-panel dashboard using plain CSS variables and dark navy theme with cyan accent.
+- 2026-10-23: Visual chunk map dynamically associates each chunk square with physical drive color and offline status.
+- 2026-10-23: Seed demo script creates 3 isolated folder drives and 2.5 MiB test file for immediate 60-second walkthrough.
+- 2026-10-23: Added dark and light theme toggle with persistent user preference via localStorage and data-theme CSS variables.
+- 2026-10-23: Added migration 0002_upload_preferences.sql adding files.storage_mode ('whole' | 'chunked_parity') and single-user upload_preferences table.
+- 2026-10-23: Implemented configurable SMART_UPLOAD_THRESHOLD_BYTES (default 1 MiB) recommending whole-object storage below 1 MiB and chunked+parity at or above 1 MiB.
+- 2026-10-23: Whole-object storage mode stores 1 AES-256-GCM chunk on the drive with most free space; reports zero parity protection and unavailable if host drive is offline.
+- 2026-10-23: Chunked+parity mode requires >= 3 online drives; validates constraints and gracefully prompts user if saved chunked preference cannot be fulfilled.
+- 2026-10-23: UploadDecisionModal built in React before file upload commitment; provides clean cancellation, mode recommendations, and "remember my preference" toggle.
+- 2026-10-23: Settings modal enhanced to view, update, and clear the saved upload preference.
+- 2026-10-24: Connected Google Drive Desktop synced folder directly to drive pool at ~/Library/CloudStorage/GoogleDrive-<email>/My Drive/sample with visible frankenstein_storage directory for real-time cloud sync to drive.google.com.
+- 2026-10-24: Fixed Content-Disposition headers with RFC 5987 UTF-8 encoding for Unicode filenames such as macOS screenshot timestamps.
+- 2026-10-24: De-duplicated physical storage volumes in pool overview by grouping drives by underlying device ID (st_dev); bounded pooled_used to actual vault_chunks_bytes.
