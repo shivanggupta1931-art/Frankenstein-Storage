@@ -253,6 +253,52 @@ export const VaultLockScreen: React.FC<VaultLockScreenProps> = ({ onUnlock, onOp
                 {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>
+            {/* Demo Password Hint / Auto-Fill */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "6px 10px",
+                backgroundColor: "rgba(6, 182, 212, 0.08)",
+                border: "1px dashed rgba(6, 182, 212, 0.3)",
+                borderRadius: "var(--radius-sm)",
+                fontSize: "11px",
+                color: "var(--text-secondary)",
+              }}
+            >
+              <span>
+                Demo Master Password:{" "}
+                <code
+                  onClick={() => setPassword("iitr@123")}
+                  style={{
+                    color: "var(--accent-cyan-solid)",
+                    cursor: "pointer",
+                    fontWeight: 700,
+                    letterSpacing: "0.5px",
+                  }}
+                  title="Click to auto-fill"
+                >
+                  iitr@123
+                </code>
+              </span>
+              <button
+                type="button"
+                onClick={() => setPassword("iitr@123")}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "var(--accent-cyan-solid)",
+                  cursor: "pointer",
+                  fontSize: "11px",
+                  fontWeight: 600,
+                  textDecoration: "underline",
+                  padding: 0,
+                }}
+              >
+                Auto-fill
+              </button>
+            </div>
           </div>
 
           <button
