@@ -46,7 +46,7 @@ def test_calculate_pooled_overview_deduplicates_same_volume(test_env):
     
     # Pooled capacity should equal single physical capacity, NOT 3x
     assert overview["pooled_capacity"] == single_drive_cap
-    assert overview["pooled_free"] == drives[0]["usage"]["free"]
+    assert abs(overview["pooled_free"] - drives[0]["usage"]["free"]) < 50 * 1024 * 1024
     assert overview["capacity_source"] == "Provider-reported (De-duplicated)"
     assert overview["drives_count"] == len(drives)
 

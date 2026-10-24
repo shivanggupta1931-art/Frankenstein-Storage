@@ -122,6 +122,12 @@ def remove_drive(drive_id: str):
         return {"status": "deleted", "drive_id": drive_id}
 
 
+@router.post("/drives/{drive_id}/eject")
+def eject_drive(drive_id: str):
+    with get_db() as conn:
+        return drive_service.eject_drive(conn, drive_id)
+
+
 @router.get("/system/macos-storage")
 def get_macos_storage():
     return {

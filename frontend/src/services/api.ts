@@ -90,7 +90,7 @@ class ApiService {
   async addDrive(
     path: string,
     displayName: string,
-    providerType: "local" | "gdrive" = "local",
+    providerType: "local" | "gdrive" | "s3" | "r2" | "minio" | "b2" | "icloud" | "onedrive" | "dropbox" = "local",
     config?: Record<string, any>
   ): Promise<Drive> {
     return this.request<Drive>("/drives", {
@@ -137,6 +137,12 @@ class ApiService {
   async deleteDrive(id: string): Promise<{ status: string }> {
     return this.request<{ status: string }>(`/drives/${id}`, {
       method: "DELETE",
+    });
+  }
+
+  async ejectDrive(id: string): Promise<{ status: string; drive_id: string; volume_name: string; message: string }> {
+    return this.request<{ status: string; drive_id: string; volume_name: string; message: string }>(`/drives/${id}/eject`, {
+      method: "POST",
     });
   }
 

@@ -22,3 +22,5 @@
 - 2026-10-24: Connected Google Drive Desktop synced folder directly to drive pool at ~/Library/CloudStorage/GoogleDrive-<email>/My Drive/sample with visible frankenstein_storage directory for real-time cloud sync to drive.google.com.
 - 2026-10-24: Fixed Content-Disposition headers with RFC 5987 UTF-8 encoding for Unicode filenames such as macOS screenshot timestamps.
 - 2026-10-24: De-duplicated physical storage volumes in pool overview by grouping drives by underlying device ID (st_dev); bounded pooled_used to actual vault_chunks_bytes.
+- 2026-10-24: Implemented S3-compatible cloud object storage provider (S3StorageProvider) supporting Cloudflare R2, AWS S3, Backblaze B2, and MinIO with zero extra dependencies using native Python hashlib/hmac/httpx with AWS Signature Version 4 and local mock fallback.
+- 2026-10-24: Added native macOS Apple iCloud Drive zero-config integration (~/Library/Mobile Documents/com~apple~CloudDocs), Microsoft OneDrive (~/Library/CloudStorage/OneDrive*), and Dropbox (~/Library/CloudStorage/Dropbox*) auto-detection with real-time cloud sync and realistic free-tier quota reporting.

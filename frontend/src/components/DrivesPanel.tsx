@@ -15,6 +15,9 @@ import {
   RefreshCw,
   AlertTriangle,
   Usb,
+  Eject,
+  Loader2,
+  Database,
 } from "lucide-react";
 import { Drive, ExternalUsbDrive } from "../types";
 import { formatBytes, getDriveColor } from "../utils/format";
@@ -28,9 +31,10 @@ interface DrivesPanelProps {
   onAddDrive: (
     path: string,
     displayName: string,
-    providerType?: "local" | "gdrive",
+    providerType?: "local" | "gdrive" | "s3" | "r2" | "minio" | "b2" | "icloud" | "onedrive" | "dropbox",
     config?: Record<string, any>
   ) => Promise<void>;
+  onEjectDrive?: (driveId: string) => Promise<void>;
 }
 
 interface MacosLocation {
@@ -51,11 +55,38 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
   onToggleOffline,
   onDeleteDrive,
   onAddDrive,
+  onEjectDrive,
 }) => {
   const [showAddForm, setShowAddForm] = useState(false);
-  const [providerType, setProviderType] = useState<"local" | "gdrive">("local");
+  const [providerType, setProviderType] = useState<"local" | "gdrive" | "s3">("local");
   const [path, setPath] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [selectedProviderHint, setSelectedProviderHint] = useState<string | null>(null);
+
+  // S3 / Cloudflare R2 / AWS S3 state
+  const [s3Endpoint, setS3Endpoint] = useState("");
+  const [s3Bucket, setS3Bucket] = useState("frankenstein-vault");
+  const [s3AccessKey, setS3AccessKey] = useState("");
+  const [s3SecretKey, setS3SecretKey] = useState("");
+  const [s3Region, setS3Region] = useState("auto");
+  const [s3Prefix, setS3Prefix] = useState("chunks/");
+  const [s3Subtype, setS3Subtype] = useState<"r2" | "s3" | "minio" | "b2">("r2");
+
+  // Eject state for external USB drives
+  const [ejectingIds, setEjectingIds] = useState<Record<string, boolean>>({});
+
+  const handleEjectDrive = async (driveId: string) => {
+    setEjectingIds((prev) => ({ ...prev, [driveId]: true }));
+    try {
+      if (onEjectDrive) {
+        await onEjectDrive(driveId);
+      } else {
+        await api.ejectDrive(driveId);
+      }
+    } finally {
+      setEjectingIds((prev) => ({ ...prev, [driveId]: false }));
+    }
+  };
 
   // External USB drives detection
   const [externalDrives, setExternalDrives] = useState<ExternalUsbDrive[]>([]);
@@ -160,6 +191,15 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
     setPath(loc.path);
     setDisplayName(loc.name);
     setAddError(null);
+    if (loc.name.toLowerCase().includes("icloud")) {
+      setSelectedProviderHint("icloud");
+    } else if (loc.name.toLowerCase().includes("onedrive")) {
+      setSelectedProviderHint("onedrive");
+    } else if (loc.name.toLowerCase().includes("dropbox")) {
+      setSelectedProviderHint("dropbox");
+    } else {
+      setSelectedProviderHint("local");
+    }
   };
 
   // Quick 1-click auto-setup of 3 real macOS storage units
@@ -176,8 +216,73 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
     }
   };
 
+  const handleApplyS3Preset = (type: "r2" | "s3" | "b2" | "minio") => {
+    setS3Subtype(type);
+    if (type === "r2") {
+      setDisplayName("Cloudflare R2 Vault");
+      setS3Endpoint("https://<account_id>.r2.cloudflarestorage.com");
+      setS3Bucket("frankenstein-vault");
+      setS3Region("auto");
+    } else if (type === "s3") {
+      setDisplayName("AWS S3 Vault");
+      setS3Endpoint("https://s3.us-east-1.amazonaws.com");
+      setS3Bucket("frankenstein-vault");
+      setS3Region("us-east-1");
+    } else if (type === "b2") {
+      setDisplayName("Backblaze B2 Vault");
+      setS3Endpoint("https://s3.us-west-004.backblazeb2.com");
+      setS3Bucket("frankenstein-vault");
+      setS3Region("us-west-004");
+    } else if (type === "minio") {
+      setDisplayName("MinIO Object Storage");
+      setS3Endpoint("http://127.0.0.1:9000");
+      setS3Bucket("frankenstein-vault");
+      setS3Region("us-east-1");
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // S3-compatible cloud storage submission
+    if (providerType === "s3") {
+      if (!s3Bucket.trim()) {
+        setAddError("S3 / R2 Bucket name is required");
+        return;
+      }
+      const finalName = displayName.trim() || `${s3Subtype.toUpperCase()} Bucket (${s3Bucket.trim()})`;
+      const cleanPrefix = s3Prefix.trim() || "chunks/";
+      const cleanPath = `s3://${s3Bucket.trim()}/${cleanPrefix}`.replace(/\/+/g, "/").replace("s3:/", "s3://");
+
+      setIsSubmitting(true);
+      setAddError(null);
+      try {
+        await onAddDrive(
+          cleanPath,
+          finalName,
+          s3Subtype,
+          {
+            endpoint_url: s3Endpoint.trim(),
+            bucket: s3Bucket.trim(),
+            access_key_id: s3AccessKey.trim(),
+            secret_access_key: s3SecretKey.trim(),
+            region: s3Region.trim() || "auto",
+            prefix: cleanPrefix,
+          }
+        );
+        setS3Bucket("frankenstein-vault");
+        setS3Endpoint("");
+        setS3AccessKey("");
+        setS3SecretKey("");
+        setDisplayName("");
+        setShowAddForm(false);
+      } catch (err: any) {
+        setAddError(err.message || "Failed to connect S3 bucket");
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
 
     // Check if user entered a Google Drive link
     const targetLink = providerType === "gdrive" ? gdriveLink.trim() : path.trim();
@@ -223,7 +328,7 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
       return;
     }
 
-    // Local macOS storage
+    // Local macOS storage, iCloud, OneDrive, Dropbox
     if (!displayName.trim()) {
       setAddError("Display name is required");
       return;
@@ -234,12 +339,24 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
       return;
     }
 
+    let effProvider: "local" | "icloud" | "onedrive" | "dropbox" = "local";
+    if (path.includes("Mobile Documents") || path.includes("com~apple~CloudDocs") || displayName.toLowerCase().includes("icloud")) {
+      effProvider = "icloud";
+    } else if (path.toLowerCase().includes("onedrive") || displayName.toLowerCase().includes("onedrive")) {
+      effProvider = "onedrive";
+    } else if (path.toLowerCase().includes("dropbox") || displayName.toLowerCase().includes("dropbox")) {
+      effProvider = "dropbox";
+    } else if (selectedProviderHint && ["icloud", "onedrive", "dropbox"].includes(selectedProviderHint)) {
+      effProvider = selectedProviderHint as any;
+    }
+
     setAddError(null);
     setIsSubmitting(true);
     try {
-      await onAddDrive(path.trim(), displayName.trim(), "local");
+      await onAddDrive(path.trim(), displayName.trim(), effProvider);
       setPath("");
       setDisplayName("");
+      setSelectedProviderHint(null);
       setShowAddForm(false);
     } catch (err: any) {
       setAddError(err.message || "Failed to add storage drive");
@@ -355,7 +472,7 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
           }}
         >
           {/* Provider Type Tabs */}
-          <div style={{ display: "flex", gap: "8px" }}>
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
             <button
               type="button"
               className="btn-interactive"
@@ -365,6 +482,7 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
               }}
               style={{
                 flex: 1,
+                minWidth: "160px",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -379,7 +497,7 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
               }}
             >
               <Folder size={15} />
-              <span>Real macOS Storage / External Drive</span>
+              <span>macOS & Cloud Sync (iCloud/USB)</span>
             </button>
 
             <button
@@ -392,6 +510,7 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
               }}
               style={{
                 flex: 1,
+                minWidth: "160px",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -406,7 +525,36 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
               }}
             >
               <Cloud size={15} />
-              <span>Google Drive (via Folder Link)</span>
+              <span>Google Drive Link</span>
+            </button>
+
+            <button
+              type="button"
+              className="btn-interactive"
+              onClick={() => {
+                setProviderType("s3");
+                setAddError(null);
+                if (!displayName) setDisplayName("Cloudflare R2 Vault");
+                if (!s3Bucket) setS3Bucket("frankenstein-vault");
+              }}
+              style={{
+                flex: 1,
+                minWidth: "160px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "8px",
+                padding: "10px",
+                borderRadius: "var(--radius-sm)",
+                fontSize: "12px",
+                fontWeight: "600",
+                backgroundColor: providerType === "s3" ? "var(--accent-cyan-solid)" : "var(--bg-base)",
+                color: providerType === "s3" ? "#ffffff" : "var(--text-secondary)",
+                border: `1px solid ${providerType === "s3" ? "var(--accent-cyan-solid)" : "var(--border-strong)"}`,
+              }}
+            >
+              <Database size={15} />
+              <span>S3 / Cloudflare R2 / AWS S3</span>
             </button>
           </div>
 
@@ -652,7 +800,7 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
                 </div>
               )}
             </div>
-          ) : (
+          ) : providerType === "gdrive" ? (
             /* Form Fields for Google Drive Link */
             <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
               <div>
@@ -781,7 +929,253 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
                 </div>
               )}
             </div>
-          )}
+          ) : providerType === "s3" ? (
+            /* S3-Compatible Storage Form */
+            <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+              {/* Presets Bar */}
+              <div>
+                <div style={{ fontSize: "11px", fontWeight: "600", color: "var(--text-muted)", marginBottom: "6px" }}>
+                  QUICK PRESETS:
+                </div>
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    onClick={() => handleApplyS3Preset("r2")}
+                    style={{
+                      padding: "6px 12px",
+                      borderRadius: "var(--radius-sm)",
+                      fontSize: "11px",
+                      fontWeight: "600",
+                      backgroundColor: s3Subtype === "r2" ? "rgba(249, 115, 22, 0.2)" : "var(--bg-base)",
+                      color: s3Subtype === "r2" ? "#f97316" : "var(--text-secondary)",
+                      border: `1px solid ${s3Subtype === "r2" ? "#f97316" : "var(--border-strong)"}`,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Cloudflare R2 (10 GiB Free)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleApplyS3Preset("s3")}
+                    style={{
+                      padding: "6px 12px",
+                      borderRadius: "var(--radius-sm)",
+                      fontSize: "11px",
+                      fontWeight: "600",
+                      backgroundColor: s3Subtype === "s3" ? "rgba(234, 179, 8, 0.2)" : "var(--bg-base)",
+                      color: s3Subtype === "s3" ? "#eab308" : "var(--text-secondary)",
+                      border: `1px solid ${s3Subtype === "s3" ? "#eab308" : "var(--border-strong)"}`,
+                      cursor: "pointer",
+                    }}
+                  >
+                    AWS S3 (US-East-1)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleApplyS3Preset("b2")}
+                    style={{
+                      padding: "6px 12px",
+                      borderRadius: "var(--radius-sm)",
+                      fontSize: "11px",
+                      fontWeight: "600",
+                      backgroundColor: s3Subtype === "b2" ? "rgba(59, 130, 246, 0.2)" : "var(--bg-base)",
+                      color: s3Subtype === "b2" ? "#3b82f6" : "var(--text-secondary)",
+                      border: `1px solid ${s3Subtype === "b2" ? "#3b82f6" : "var(--border-strong)"}`,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Backblaze B2 (10 GiB Free)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleApplyS3Preset("minio")}
+                    style={{
+                      padding: "6px 12px",
+                      borderRadius: "var(--radius-sm)",
+                      fontSize: "11px",
+                      fontWeight: "600",
+                      backgroundColor: s3Subtype === "minio" ? "rgba(168, 85, 247, 0.2)" : "var(--bg-base)",
+                      color: s3Subtype === "minio" ? "#a855f7" : "var(--text-secondary)",
+                      border: `1px solid ${s3Subtype === "minio" ? "#a855f7" : "var(--border-strong)"}`,
+                      cursor: "pointer",
+                    }}
+                  >
+                    MinIO / Local S3
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                <div>
+                  <label style={{ display: "block", fontSize: "11px", fontWeight: "600", color: "var(--text-secondary)", marginBottom: "4px" }}>
+                    STORAGE UNIT NAME
+                  </label>
+                  <input
+                    type="text"
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                    placeholder="e.g. Cloudflare R2 Secondary"
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      backgroundColor: "var(--bg-base)",
+                      border: "1px solid var(--border-strong)",
+                      borderRadius: "var(--radius-sm)",
+                      fontSize: "13px",
+                      color: "var(--text-primary)",
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: "block", fontSize: "11px", fontWeight: "600", color: "var(--text-secondary)", marginBottom: "4px" }}>
+                    S3 BUCKET NAME *
+                  </label>
+                  <input
+                    type="text"
+                    value={s3Bucket}
+                    onChange={(e) => setS3Bucket(e.target.value)}
+                    placeholder="frankenstein-vault"
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      backgroundColor: "var(--bg-base)",
+                      border: "1px solid var(--border-strong)",
+                      borderRadius: "var(--radius-sm)",
+                      fontSize: "13px",
+                      color: "var(--text-primary)",
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: "block", fontSize: "11px", fontWeight: "600", color: "var(--text-secondary)", marginBottom: "4px" }}>
+                  ENDPOINT URL
+                </label>
+                <input
+                  type="text"
+                  value={s3Endpoint}
+                  onChange={(e) => setS3Endpoint(e.target.value)}
+                  placeholder="e.g. https://<account_id>.r2.cloudflarestorage.com or https://s3.amazonaws.com"
+                  style={{
+                    width: "100%",
+                    padding: "8px 12px",
+                    backgroundColor: "var(--bg-base)",
+                    border: "1px solid var(--border-strong)",
+                    borderRadius: "var(--radius-sm)",
+                    fontSize: "13px",
+                    fontFamily: "var(--font-mono)",
+                    color: "var(--text-primary)",
+                  }}
+                />
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                <div>
+                  <label style={{ display: "block", fontSize: "11px", fontWeight: "600", color: "var(--text-secondary)", marginBottom: "4px" }}>
+                    ACCESS KEY ID (Optional for Mock)
+                  </label>
+                  <input
+                    type="text"
+                    value={s3AccessKey}
+                    onChange={(e) => setS3AccessKey(e.target.value)}
+                    placeholder="Leave empty or use test key for mock"
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      backgroundColor: "var(--bg-base)",
+                      border: "1px solid var(--border-strong)",
+                      borderRadius: "var(--radius-sm)",
+                      fontSize: "13px",
+                      fontFamily: "var(--font-mono)",
+                      color: "var(--text-primary)",
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: "block", fontSize: "11px", fontWeight: "600", color: "var(--text-secondary)", marginBottom: "4px" }}>
+                    SECRET ACCESS KEY
+                  </label>
+                  <input
+                    type="password"
+                    value={s3SecretKey}
+                    onChange={(e) => setS3SecretKey(e.target.value)}
+                    placeholder="Secret Key"
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      backgroundColor: "var(--bg-base)",
+                      border: "1px solid var(--border-strong)",
+                      borderRadius: "var(--radius-sm)",
+                      fontSize: "13px",
+                      fontFamily: "var(--font-mono)",
+                      color: "var(--text-primary)",
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                <div>
+                  <label style={{ display: "block", fontSize: "11px", fontWeight: "600", color: "var(--text-secondary)", marginBottom: "4px" }}>
+                    REGION (Defaults to auto)
+                  </label>
+                  <input
+                    type="text"
+                    value={s3Region}
+                    onChange={(e) => setS3Region(e.target.value)}
+                    placeholder="auto"
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      backgroundColor: "var(--bg-base)",
+                      border: "1px solid var(--border-strong)",
+                      borderRadius: "var(--radius-sm)",
+                      fontSize: "13px",
+                      color: "var(--text-primary)",
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: "block", fontSize: "11px", fontWeight: "600", color: "var(--text-secondary)", marginBottom: "4px" }}>
+                    CHUNK SUBFOLDER PREFIX
+                  </label>
+                  <input
+                    type="text"
+                    value={s3Prefix}
+                    onChange={(e) => setS3Prefix(e.target.value)}
+                    placeholder="chunks/"
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      backgroundColor: "var(--bg-base)",
+                      border: "1px solid var(--border-strong)",
+                      borderRadius: "var(--radius-sm)",
+                      fontSize: "13px",
+                      color: "var(--text-primary)",
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div
+                style={{
+                  fontSize: "11px",
+                  color: "var(--text-muted)",
+                  lineHeight: "1.4",
+                  padding: "8px 12px",
+                  backgroundColor: "rgba(255, 255, 255, 0.03)",
+                  border: "1px solid var(--border-subtle)",
+                  borderRadius: "var(--radius-sm)",
+                }}
+              >
+                Zero external AWS SDK dependencies. Authenticates directly with S3 API via AWS Signature Version 4. If credentials are left blank or test keys are used, safe local mock storage is used automatically.
+              </div>
+            </div>
+          ) : null}
 
           {/* Form Actions */}
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "4px" }}>
@@ -824,7 +1218,9 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
                 ? "Connecting..."
                 : providerType === "gdrive"
                 ? "Connect Google Drive Link"
-                : "Register macOS Storage"}
+                : providerType === "s3"
+                ? "Connect S3 / Cloudflare R2"
+                : "Register Storage"}
             </button>
           </div>
         </form>
@@ -996,7 +1392,8 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
         {drives.map((drive, idx) => {
           const driveColor = getDriveColor(idx);
           const isSimulated = drive.simulated_offline;
-          const isOnline = drive.status === "online" && !isSimulated;
+          const isEjected = drive.status === "ejected";
+          const isOnline = drive.status === "online" && !isSimulated && !isEjected;
           const isGdrive =
             drive.provider_type === "gdrive" ||
             drive.path.startsWith("gdrive://") ||
@@ -1055,57 +1452,215 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
                       <span style={{ fontSize: "13px", fontWeight: "600", color: "var(--text-primary)" }}>
                         {drive.display_name}
                       </span>
-                      {isGdrive ? (
-                        <span
-                          style={{
-                            fontSize: "9px",
-                            fontWeight: "700",
-                            padding: "1px 6px",
-                            backgroundColor: "var(--bg-base)",
-                            color: "var(--accent-cyan-solid)",
-                            border: "1px solid var(--accent-cyan-solid)",
-                            borderRadius: "var(--radius-sm)",
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: "3px",
-                          }}
-                        >
-                          <Cloud size={10} />
-                          <span>GOOGLE DRIVE</span>
-                        </span>
-                      ) : isUsb ? (
-                        <span
-                          style={{
-                            fontSize: "9px",
-                            fontWeight: "700",
-                            padding: "1px 6px",
-                            backgroundColor: "rgba(6, 182, 212, 0.15)",
-                            color: "var(--accent-cyan-solid, #06b6d4)",
-                            border: "1px solid rgba(6, 182, 212, 0.4)",
-                            borderRadius: "var(--radius-sm)",
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: "3px",
-                          }}
-                        >
-                          <Usb size={10} />
-                          <span>EXTERNAL USB</span>
-                        </span>
-                      ) : (
-                        <span
-                          style={{
-                            fontSize: "9px",
-                            fontWeight: "700",
-                            padding: "1px 6px",
-                            backgroundColor: "var(--bg-base)",
-                            color: "var(--text-muted)",
-                            border: "1px solid var(--border-strong)",
-                            borderRadius: "var(--radius-sm)",
-                          }}
-                        >
-                          MACOS LOCAL
-                        </span>
-                      )}
+                      {(() => {
+                        const isICloud = Boolean(
+                          drive.provider_type === "icloud" ||
+                          drive.path.includes("Mobile Documents") ||
+                          drive.path.includes("com~apple~CloudDocs") ||
+                          drive.display_name.toLowerCase().includes("icloud") ||
+                          drive.usage?.source?.toLowerCase().includes("icloud")
+                        );
+
+                        const isOneDrive = Boolean(
+                          drive.provider_type === "onedrive" ||
+                          drive.path.toLowerCase().includes("onedrive") ||
+                          drive.display_name.toLowerCase().includes("onedrive") ||
+                          drive.usage?.source?.toLowerCase().includes("onedrive")
+                        );
+
+                        const isDropbox = Boolean(
+                          drive.provider_type === "dropbox" ||
+                          drive.path.toLowerCase().includes("dropbox") ||
+                          drive.display_name.toLowerCase().includes("dropbox") ||
+                          drive.usage?.source?.toLowerCase().includes("dropbox")
+                        );
+
+                        const isR2 = Boolean(
+                          drive.provider_type === "r2" ||
+                          drive.path.toLowerCase().includes("r2") ||
+                          drive.display_name.toLowerCase().includes("r2") ||
+                          drive.usage?.source?.toLowerCase().includes("r2")
+                        );
+
+                        const isS3 = Boolean(
+                          drive.provider_type === "s3" ||
+                          drive.provider_type === "minio" ||
+                          drive.provider_type === "b2" ||
+                          drive.path.startsWith("s3://") ||
+                          drive.display_name.toLowerCase().includes("s3") ||
+                          drive.usage?.source?.toLowerCase().includes("s3")
+                        );
+
+                        if (isICloud) {
+                          return (
+                            <span
+                              style={{
+                                fontSize: "9px",
+                                fontWeight: "700",
+                                padding: "1px 6px",
+                                backgroundColor: "rgba(56, 189, 248, 0.15)",
+                                color: "#38bdf8",
+                                border: "1px solid rgba(56, 189, 248, 0.4)",
+                                borderRadius: "var(--radius-sm)",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "3px",
+                              }}
+                            >
+                              <Cloud size={10} />
+                              <span>ICLOUD DRIVE</span>
+                            </span>
+                          );
+                        }
+
+                        if (isR2) {
+                          return (
+                            <span
+                              style={{
+                                fontSize: "9px",
+                                fontWeight: "700",
+                                padding: "1px 6px",
+                                backgroundColor: "rgba(249, 115, 22, 0.15)",
+                                color: "#f97316",
+                                border: "1px solid rgba(249, 115, 22, 0.4)",
+                                borderRadius: "var(--radius-sm)",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "3px",
+                              }}
+                            >
+                              <Database size={10} />
+                              <span>CLOUDFLARE R2</span>
+                            </span>
+                          );
+                        }
+
+                        if (isS3) {
+                          return (
+                            <span
+                              style={{
+                                fontSize: "9px",
+                                fontWeight: "700",
+                                padding: "1px 6px",
+                                backgroundColor: "rgba(234, 179, 8, 0.15)",
+                                color: "#eab308",
+                                border: "1px solid rgba(234, 179, 8, 0.4)",
+                                borderRadius: "var(--radius-sm)",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "3px",
+                              }}
+                            >
+                              <Database size={10} />
+                              <span>AWS S3 / OBJECT</span>
+                            </span>
+                          );
+                        }
+
+                        if (isOneDrive) {
+                          return (
+                            <span
+                              style={{
+                                fontSize: "9px",
+                                fontWeight: "700",
+                                padding: "1px 6px",
+                                backgroundColor: "rgba(37, 99, 235, 0.15)",
+                                color: "#3b82f6",
+                                border: "1px solid rgba(37, 99, 235, 0.4)",
+                                borderRadius: "var(--radius-sm)",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "3px",
+                              }}
+                            >
+                              <Cloud size={10} />
+                              <span>ONEDRIVE</span>
+                            </span>
+                          );
+                        }
+
+                        if (isDropbox) {
+                          return (
+                            <span
+                              style={{
+                                fontSize: "9px",
+                                fontWeight: "700",
+                                padding: "1px 6px",
+                                backgroundColor: "rgba(99, 102, 241, 0.15)",
+                                color: "#818cf8",
+                                border: "1px solid rgba(99, 102, 241, 0.4)",
+                                borderRadius: "var(--radius-sm)",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "3px",
+                              }}
+                            >
+                              <Cloud size={10} />
+                              <span>DROPBOX</span>
+                            </span>
+                          );
+                        }
+
+                        if (isGdrive) {
+                          return (
+                            <span
+                              style={{
+                                fontSize: "9px",
+                                fontWeight: "700",
+                                padding: "1px 6px",
+                                backgroundColor: "var(--bg-base)",
+                                color: "var(--accent-cyan-solid)",
+                                border: "1px solid var(--accent-cyan-solid)",
+                                borderRadius: "var(--radius-sm)",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "3px",
+                              }}
+                            >
+                              <Cloud size={10} />
+                              <span>GOOGLE DRIVE</span>
+                            </span>
+                          );
+                        }
+
+                        if (isUsb) {
+                          return (
+                            <span
+                              style={{
+                                fontSize: "9px",
+                                fontWeight: "700",
+                                padding: "1px 6px",
+                                backgroundColor: "rgba(6, 182, 212, 0.15)",
+                                color: "var(--accent-cyan-solid, #06b6d4)",
+                                border: "1px solid rgba(6, 182, 212, 0.4)",
+                                borderRadius: "var(--radius-sm)",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "3px",
+                              }}
+                            >
+                              <Usb size={10} />
+                              <span>EXTERNAL USB</span>
+                            </span>
+                          );
+                        }
+
+                        return (
+                          <span
+                            style={{
+                              fontSize: "9px",
+                              fontWeight: "700",
+                              padding: "1px 6px",
+                              backgroundColor: "var(--bg-base)",
+                              color: "var(--text-muted)",
+                              border: "1px solid var(--border-strong)",
+                              borderRadius: "var(--radius-sm)",
+                            }}
+                          >
+                            MACOS LOCAL
+                          </span>
+                        );
+                      })()}
                       {drive.shared_device && (
                         <span
                           style={{
@@ -1211,6 +1766,8 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
                       letterSpacing: "0.03em",
                       backgroundColor: isOnline
                         ? "var(--status-online-bg)"
+                        : isEjected
+                        ? "rgba(245, 158, 11, 0.12)"
                         : isSimulated
                         ? "var(--status-simulated-bg)"
                         : isUsb
@@ -1219,6 +1776,8 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
                       border: `1px solid ${
                         isOnline
                           ? "var(--status-online)"
+                          : isEjected
+                          ? "#f59e0b"
                           : isSimulated
                           ? "var(--status-simulated)"
                           : isUsb
@@ -1227,6 +1786,8 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
                       }`,
                       color: isOnline
                         ? "var(--status-online-text)"
+                        : isEjected
+                        ? "#f59e0b"
                         : isSimulated
                         ? "var(--status-simulated-text)"
                         : isUsb
@@ -1241,6 +1802,8 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
                         borderRadius: "50%",
                         backgroundColor: isOnline
                           ? "var(--status-online)"
+                          : isEjected
+                          ? "#f59e0b"
                           : isSimulated
                           ? "var(--status-simulated)"
                           : isUsb
@@ -1253,6 +1816,8 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
                         ? isUsb
                           ? "Online (USB)"
                           : "Online"
+                        : isEjected
+                        ? "Ejected / Unplugged"
                         : isSimulated
                         ? "Simulated offline"
                         : isUsb
@@ -1260,6 +1825,42 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
                         : "Unavailable"}
                     </span>
                   </span>
+
+                  {/* Safe Eject button for external USB pendrives */}
+                  {isUsb && (
+                    <button
+                      className="btn-interactive"
+                      onClick={() => handleEjectDrive(drive.id)}
+                      disabled={Boolean(ejectingIds[drive.id]) || isEjected}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "5px",
+                        padding: "4px 8px",
+                        backgroundColor: isEjected ? "rgba(245, 158, 11, 0.05)" : "rgba(245, 158, 11, 0.12)",
+                        border: `1px solid ${isEjected ? "rgba(245, 158, 11, 0.25)" : "rgba(245, 158, 11, 0.45)"}`,
+                        borderRadius: "var(--radius-sm)",
+                        fontSize: "11px",
+                        fontWeight: "600",
+                        color: isEjected ? "rgba(245, 158, 11, 0.6)" : "#f59e0b",
+                        cursor: ejectingIds[drive.id] || isEjected ? "not-allowed" : "pointer",
+                      }}
+                      aria-label={`Safely unmount and eject ${drive.display_name}`}
+                      title={isEjected ? "Pendrive already ejected" : "Safely unmount and eject USB pendrive"}
+                    >
+                      {ejectingIds[drive.id] ? (
+                        <>
+                          <Loader2 size={12} className="spin" />
+                          <span>Ejecting...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Eject size={12} />
+                          <span>{isEjected ? "Ejected" : "Eject"}</span>
+                        </>
+                      )}
+                    </button>
+                  )}
 
                   {/* Toggle simulated offline button */}
                   <button
@@ -1332,7 +1933,24 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
                 </div>
               </div>
 
-              {isUsb && !isOnline && !isSimulated && (
+              {isEjected ? (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    padding: "8px 12px",
+                    backgroundColor: "rgba(245, 158, 11, 0.08)",
+                    border: "1px solid rgba(245, 158, 11, 0.25)",
+                    borderRadius: "var(--radius-sm)",
+                    fontSize: "12px",
+                    color: "#f59e0b",
+                  }}
+                >
+                  <AlertTriangle size={15} style={{ flexShrink: 0 }} />
+                  <span>Pendrive ejected. Re-insert USB drive to reconnect to the storage pool.</span>
+                </div>
+              ) : isUsb && !isOnline && !isSimulated ? (
                 <div
                   style={{
                     display: "flex",
@@ -1349,7 +1967,7 @@ export const DrivesPanel: React.FC<DrivesPanelProps> = ({
                   <AlertCircle size={15} style={{ flexShrink: 0 }} />
                   <span>Pendrive disconnected. Plug back in or rebuild from parity.</span>
                 </div>
-              )}
+              ) : null}
             </div>
           );
         })}

@@ -168,16 +168,43 @@ export const Dashboard: React.FC = () => {
     }
   };
 
+  const handleEjectDrive = async (driveId: string) => {
+    try {
+      const res = await api.ejectDrive(driveId);
+      addToast(
+        "success",
+        res.message || `USB Drive '${res.volume_name}' safely unmounted. You can now physically unplug your pendrive.`
+      );
+      await refreshData();
+    } catch (err: any) {
+      addToast("error", err.message || "Failed to safely eject USB drive");
+    }
+  };
+
   const handleAddDrive = async (
     path: string,
     displayName: string,
-    providerType: "local" | "gdrive" = "local",
+    providerType: "local" | "gdrive" | "s3" | "r2" | "minio" | "b2" | "icloud" | "onedrive" | "dropbox" = "local",
     config?: Record<string, any>
   ) => {
     await api.addDrive(path, displayName, providerType, config);
+    const typeLabel =
+      providerType === "gdrive"
+        ? "Google Drive"
+        : providerType === "icloud"
+        ? "Apple iCloud Drive"
+        : providerType === "r2"
+        ? "Cloudflare R2"
+        : providerType === "s3"
+        ? "AWS S3"
+        : providerType === "onedrive"
+        ? "Microsoft OneDrive"
+        : providerType === "dropbox"
+        ? "Dropbox"
+        : "Local";
     addToast(
       "success",
-      `Drive '${displayName}' registered (${providerType === "gdrive" ? "Google Drive" : "Local"})`
+      `Drive '${displayName}' registered (${typeLabel})`
     );
     await refreshData();
   };
@@ -474,6 +501,7 @@ export const Dashboard: React.FC = () => {
             onToggleOffline={handleToggleOffline}
             onDeleteDrive={handleDeleteDrive}
             onAddDrive={handleAddDrive}
+            onEjectDrive={handleEjectDrive}
           />
 
           {/* Files Panel (Panel 3) */}

@@ -157,3 +157,171 @@ async def test_hybrid_pool_with_external_usb_and_parity_rebuild(test_env, tmp_pa
     downloaded_deg = b"".join(list(gen_deg))
     assert downloaded_deg == sample_data
     assert tracker_deg["was_rebuilt"] is True
+
+
+def test_external_drive_flat_chunk_structure_and_manifest(tmp_path: Path):
+    usb_root = tmp_path / "Volumes" / "MyPendrive" / "FrankensteinStorage"
+    provider = LocalFolderProvider(root_path=usb_root)
+
+    chunk_id = "a1b2c3d4e5f60718293a4b5c6d7e8f90"
+    test_data = b"Encrypted chunk payload for USB flat test"
+    provider.put_chunk(chunk_id, test_data)
+
+    # 1. Verify chunk is stored flat directly in chunks/<chunk_id>, NOT in chunks/a1/b2/
+    expected_flat_chunk = usb_root / "frankenstein_storage" / "chunks" / chunk_id
+    assert expected_flat_chunk.exists(), "Chunk is stored directly in flat chunks folder"
+    assert not (usb_root / "frankenstein_storage" / "chunks" / "a1").exists(), "No nested a1 folder created"
+
+    # 2. Verify chunk can be read back cleanly
+    retrieved = provider.get_chunk(chunk_id)
+    assert retrieved == test_data
+
+    # 3. Verify VAULT_MANIFEST.txt is created and contains chunk details
+    manifest_file = usb_root / "VAULT_MANIFEST.txt"
+    assert manifest_file.exists()
+    content = manifest_file.read_text(encoding="utf-8")
+    assert "FRANKENSTEIN STORAGE — EXTERNAL DRIVE MANIFEST" in content
+    assert chunk_id in content
+    assert str(len(test_data)) in content
+
+    # 4. Verify deleting chunk updates manifest
+    deleted = provider.delete_chunk(chunk_id)
+    assert deleted is True
+    assert not expected_flat_chunk.exists()
+    content_after = manifest_file.read_text(encoding="utf-8")
+    assert chunk_id not in content_after
+    assert "Total Chunks Stored : 0" in content_after
+
+
+def test_auto_migration_nested_chunks_to_flat_structure(tmp_path: Path):
+    usb_root = tmp_path / "Volumes" / "Sandisk" / "FrankensteinStorage"
+    visible_chunks = usb_root / "frankenstein_storage" / "chunks"
+    legacy_chunks = usb_root / ".frankenstein" / "chunks"
+
+    # Pre-populate nested chunk 1 in visible folder (chunks/5e/38/<id>)
+    c1_id = "5e38bebb042445bb91079b09ce4e959e"
+    c1_path = visible_chunks / "5e" / "38" / c1_id
+    c1_path.parent.mkdir(parents=True)
+    c1_path.write_bytes(b"chunk 1 data")
+
+    # Pre-populate nested chunk 2 in legacy hidden folder (.frankenstein/chunks/49/0d/<id>)
+    c2_id = "490da59054b24fc5954818c7ca792d50"
+    c2_path = legacy_chunks / "49" / "0d" / c2_id
+    c2_path.parent.mkdir(parents=True)
+    c2_path.write_bytes(b"chunk 2 data")
+
+    # Instantiate provider - this should auto-migrate all nested chunks to flat structure
+    provider = LocalFolderProvider(root_path=usb_root)
+
+    # 1. Verify chunks now exist flat
+    flat1 = visible_chunks / c1_id
+    flat2 = visible_chunks / c2_id
+    assert flat1.exists()
+    assert flat2.exists()
+
+    # 2. Verify nested folders are cleaned up
+    assert not (visible_chunks / "5e").exists(), "Empty 5e subfolder cleaned up"
+    assert not (usb_root / ".frankenstein").exists(), "Empty legacy .frankenstein cleaned up"
+
+    # 3. Verify get_chunk works for both
+    assert provider.get_chunk(c1_id) == b"chunk 1 data"
+    assert provider.get_chunk(c2_id) == b"chunk 2 data"
+
+    # 4. Verify manifest lists both migrated chunks
+    manifest_content = (usb_root / "VAULT_MANIFEST.txt").read_text(encoding="utf-8")
+    assert c1_id in manifest_content
+    assert c2_id in manifest_content
+    assert "Total Chunks Stored : 2" in manifest_content
+
+
+@pytest.mark.asyncio
+async def test_safe_eject_external_usb_drive(test_env, tmp_path: Path):
+    conn = test_env["conn"]
+
+    # 1. Setup internal SSD drive
+    d_int_path = tmp_path / "SSD"
+    d_int = drive_service.add_drive(conn, str(d_int_path), "Internal SSD", provider_type="local")
+
+    # 2. Setup external USB drive under /Volumes/
+    d_usb_path = tmp_path / "Volumes" / "LexarUSB" / "FrankensteinStorage"
+    d_usb = drive_service.add_drive(conn, str(d_usb_path), "Lexar USB Flash Drive", provider_type="local")
+    conn.commit()
+
+    transport = ASGITransport(app=app)
+    headers = {"Authorization": f"Bearer {settings.session_token}"}
+    async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
+        # Rejection test: attempting to eject internal SSD should fail with 400
+        res_fail = await ac.post(f"/api/v1/drives/{d_int['id']}/eject", headers=headers)
+        assert res_fail.status_code == 400
+        assert res_fail.json()["error"]["code"] == "NOT_AN_EXTERNAL_DRIVE"
+
+        # Success test: eject external USB pendrive
+        res_ok = await ac.post(f"/api/v1/drives/{d_usb['id']}/eject", headers=headers)
+        assert res_ok.status_code == 200
+        body = res_ok.json()
+        assert body["status"] == "ejected"
+        assert body["volume_name"] == "LexarUSB"
+        assert "safely unmounted" in body["message"]
+
+    # Verify drive status in database and list_drives
+    drives = drive_service.list_drives(conn)
+    usb_found = next(d for d in drives if d["id"] == d_usb["id"])
+    assert usb_found["status"] == "ejected"
+    assert "Pendrive ejected" in usb_found["exclusion_reason"]
+    assert usb_found["is_placement_eligible"] is False
+
+    # Verify operation log entry
+    cursor = conn.cursor()
+    cursor.execute("SELECT operation, details, status FROM operation_log WHERE operation = 'EJECT_DRIVE'")
+    op = cursor.fetchone()
+    assert op is not None
+    assert op["status"] == "SUCCESS"
+    assert "LexarUSB" in op["details"]
+
+
+@pytest.mark.asyncio
+async def test_safe_eject_parity_recovery_fault_tolerance(test_env, tmp_path: Path):
+    conn = test_env["conn"]
+
+    conn.execute("DELETE FROM chunks")
+    conn.execute("DELETE FROM files")
+    conn.execute("DELETE FROM drives")
+    conn.commit()
+
+    # 1. Add 2 internal SSD drives
+    d1 = drive_service.add_drive(conn, str(tmp_path / "SSD1"), "SSD 1", provider_type="local")
+    d2 = drive_service.add_drive(conn, str(tmp_path / "SSD2"), "SSD 2", provider_type="local")
+
+    # 2. Add 1 external USB pendrive
+    usb_path = tmp_path / "Volumes" / "SamsungBar" / "FrankensteinStorage"
+    d_usb = drive_service.add_drive(conn, str(usb_path), "Samsung Bar USB", provider_type="local")
+
+    # Upload file with XOR parity striped across the drives
+    sample_data = os.urandom(120 * 1024)
+    uploaded = await storage_engine.upload_stream(
+        conn=conn,
+        stream=io.BytesIO(sample_data),
+        filename="eject_resilience_test.bin",
+        mode="chunked_parity",
+    )
+    assert uploaded["protection_status"] == "parity"
+
+    # Verify chunks exist on the USB drive
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) AS count FROM chunks WHERE file_id = ? AND drive_id = ?", (uploaded["id"], d_usb["id"]))
+    assert cursor.fetchone()["count"] > 0
+
+    # Safely eject the USB pendrive
+    eject_res = drive_service.eject_drive(conn, d_usb["id"])
+    assert eject_res["status"] == "ejected"
+    assert eject_res["volume_name"] == "SamsungBar"
+
+    # Seamless XOR parity reconstruction on retrieve_file
+    meta, retrieved_data = storage_engine.retrieve_file(conn, uploaded["id"])
+    assert retrieved_data == sample_data
+
+    # Verify download_stream indicates parity reconstruction
+    meta, gen, tracker = storage_engine.download_stream(conn, uploaded["id"])
+    streamed = b"".join(list(gen))
+    assert streamed == sample_data
+    assert tracker["was_rebuilt"] is True

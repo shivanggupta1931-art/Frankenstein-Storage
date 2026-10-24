@@ -3,6 +3,7 @@ import os
 import re
 import shutil
 import sqlite3
+import subprocess
 import uuid
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,7 @@ from backend.app.core.errors import AppError
 from backend.app.providers.base import StorageProvider
 from backend.app.providers.gdrive import GoogleDriveProvider
 from backend.app.providers.local import LocalFolderProvider
+from backend.app.providers.s3 import S3StorageProvider
 
 
 def get_drive_provider(drive_row: sqlite3.Row | dict[str, Any]) -> StorageProvider:
@@ -23,6 +25,14 @@ def get_drive_provider(drive_row: sqlite3.Row | dict[str, Any]) -> StorageProvid
         raw_config = row_dict.get("config")
         config = raw_config if isinstance(raw_config, (dict, type(None))) else json.loads(raw_config)
         return GoogleDriveProvider(
+            config=config,
+            simulated_offline=bool(row_dict.get("simulated_offline", 0)),
+        )
+
+    if provider_type in ("s3", "r2", "minio", "b2") or path_val.startswith("s3://"):
+        raw_config = row_dict.get("config")
+        config = raw_config if isinstance(raw_config, (dict, type(None))) else (json.loads(raw_config) if raw_config else {})
+        return S3StorageProvider(
             config=config,
             simulated_offline=bool(row_dict.get("simulated_offline", 0)),
         )
@@ -55,7 +65,11 @@ def list_drives(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         is_low_space = bool(free_bytes < reserve_bytes)
 
         # Determine status string and placement eligibility
-        if row["simulated_offline"]:
+        if row["status"] == "ejected":
+            effective_status = "ejected"
+            exclusion_reason = "Pendrive ejected. Re-insert USB drive to reconnect to the storage pool."
+            is_eligible = False
+        elif row["simulated_offline"]:
             effective_status = "simulated_offline"
             exclusion_reason = "Offline (Simulated)"
             is_eligible = False
@@ -367,41 +381,71 @@ def get_macos_storage_locations() -> list[dict[str, Any]]:
 
     # Detect Google Drive desktop volumes if mounted under /Volumes
     volumes_dir = Path("/Volumes")
-    if volumes_dir.exists():
-        for vol in volumes_dir.iterdir():
-            if vol.name.startswith(".") or vol.is_symlink():
-                continue
-            is_gdrive_vol = "googledrive" in vol.name.lower() or "google drive" in vol.name.lower()
-            if is_gdrive_vol:
-                try:
-                    vol_usage = shutil.disk_usage(vol)
-                    my_drive_vol = vol / "My Drive"
-                    target_path = my_drive_vol if my_drive_vol.exists() else vol
-                    sample_folder = target_path / "sample"
-                    final_path = sample_folder if sample_folder.exists() else (target_path / "FrankensteinVault")
-                    gdrive_vol_quota = 15 * (1024 ** 3)
-                    locations.append({
-                        "name": f"Google Drive Desktop ({vol.name})",
-                        "path": str(final_path),
-                        "total": gdrive_vol_quota,
-                        "free": gdrive_vol_quota,
-                        "used": 0,
-                        "is_external": False,
-                        "is_cloud_synced": True,
-                        "description": "Auto-syncs chunks directly to Google Drive in real-time",
-                    })
-                except Exception:
+    try:
+        if volumes_dir.exists():
+            for vol in volumes_dir.iterdir():
+                if vol.name.startswith(".") or vol.is_symlink():
                     continue
+                is_gdrive_vol = "googledrive" in vol.name.lower() or "google drive" in vol.name.lower()
+                if is_gdrive_vol:
+                    try:
+                        vol_usage = shutil.disk_usage(vol)
+                        my_drive_vol = vol / "My Drive"
+                        target_path = my_drive_vol if my_drive_vol.exists() else vol
+                        sample_folder = target_path / "sample"
+                        final_path = sample_folder if sample_folder.exists() else (target_path / "FrankensteinVault")
+                        gdrive_vol_quota = 15 * (1024 ** 3)
+                        locations.append({
+                            "name": f"Google Drive Desktop ({vol.name})",
+                            "path": str(final_path),
+                            "total": gdrive_vol_quota,
+                            "free": gdrive_vol_quota,
+                            "used": 0,
+                            "is_external": False,
+                            "is_cloud_synced": True,
+                            "description": "Auto-syncs chunks directly to Google Drive in real-time",
+                        })
+                    except Exception:
+                        continue
+    except (PermissionError, OSError):
+        pass
 
-    # 5. Cloud Storage providers (Google Drive for Desktop in ~/Library/CloudStorage)
+    # 5. Apple iCloud Drive (native macOS cloud storage via ~/Library/Mobile Documents/com~apple~CloudDocs)
+    icloud_base = home / "Library" / "Mobile Documents" / "com~apple~CloudDocs"
+    if icloud_base.exists():
+        icloud_vault = icloud_base / "FrankensteinStorage"
+        icloud_quota = 5 * (1024 ** 3)  # 5 GiB standard free tier
+        locations.append({
+            "name": "Apple iCloud Drive",
+            "path": str(icloud_vault),
+            "total": icloud_quota,
+            "free": icloud_quota,
+            "used": 0,
+            "is_external": False,
+            "is_cloud_synced": True,
+            "description": "Native macOS zero-config cloud sync via iCloud Drive (5 GiB free tier)",
+        })
+
+    # 6. Cloud Storage providers (Google Drive, OneDrive, Dropbox in ~/Library/CloudStorage or ~)
     cloud_storage = home / "Library" / "CloudStorage"
+    detected_onedrive = False
+    detected_dropbox = False
     if cloud_storage.exists():
         try:
             for item in cloud_storage.iterdir():
                 if item.is_dir() and not item.name.startswith("."):
                     try:
                         c_usage = shutil.disk_usage(item)
-                        is_gdrive = "googledrive" in item.name.lower()
+                        lower_name = item.name.lower()
+                        is_gdrive = "googledrive" in lower_name
+                        is_onedrive = "onedrive" in lower_name
+                        is_dropbox = "dropbox" in lower_name
+
+                        if is_onedrive:
+                            detected_onedrive = True
+                        if is_dropbox:
+                            detected_dropbox = True
+
                         my_drive = item / "My Drive"
                         existing_target = None
                         if my_drive.exists():
@@ -414,23 +458,70 @@ def get_macos_storage_locations() -> list[dict[str, Any]]:
                             except Exception:
                                 pass
 
-                        final_dir = existing_target if existing_target else (my_drive / "FrankensteinStorage" if my_drive.exists() else item)
-                        gdrive_quota = 15 * (1024 ** 3) if is_gdrive else c_usage.total
-                        email_hint = item.name.replace("GoogleDrive-", "") if is_gdrive else item.name
+                        final_dir = existing_target if existing_target else (my_drive / "FrankensteinStorage" if my_drive.exists() else item / "FrankensteinStorage")
+                        if is_gdrive:
+                            quota = 15 * (1024 ** 3)
+                            email_hint = item.name.replace("GoogleDrive-", "")
+                            disp_name = f"Google Drive ({email_hint})"
+                            desc = f"Auto-syncs chunks directly to Google Drive ({email_hint}) in real-time"
+                        elif is_onedrive:
+                            quota = 5 * (1024 ** 3)
+                            hint = item.name.replace("OneDrive-", "")
+                            disp_name = f"Microsoft OneDrive ({hint})"
+                            desc = f"Auto-syncs chunks directly to OneDrive ({hint}) in real-time"
+                        elif is_dropbox:
+                            quota = 2 * (1024 ** 3)
+                            hint = item.name.replace("Dropbox-", "")
+                            disp_name = f"Dropbox ({hint})"
+                            desc = f"Auto-syncs chunks directly to Dropbox ({hint}) in real-time"
+                        else:
+                            quota = c_usage.total
+                            disp_name = f"Cloud Storage: {item.name}"
+                            desc = f"Synced cloud folder via {item.name}"
+
                         locations.append({
-                            "name": f"Google Drive ({email_hint})" if is_gdrive else f"Cloud Storage: {item.name}",
+                            "name": disp_name,
                             "path": str(final_dir),
-                            "total": gdrive_quota,
-                            "free": gdrive_quota if is_gdrive else c_usage.free,
-                            "used": 0 if is_gdrive else c_usage.used,
+                            "total": quota,
+                            "free": quota,
+                            "used": 0,
                             "is_external": False,
                             "is_cloud_synced": True,
-                            "description": f"Auto-syncs chunks directly to {email_hint} in real-time" if is_gdrive else f"Synced cloud folder via {item.name}",
+                            "description": desc,
                         })
                     except Exception:
                         pass
         except Exception:
             pass
+
+    # Check fallback home OneDrive / Dropbox if not found in CloudStorage
+    if not detected_onedrive and (home / "OneDrive").exists():
+        od_path = home / "OneDrive" / "FrankensteinStorage"
+        od_quota = 5 * (1024 ** 3)
+        locations.append({
+            "name": "Microsoft OneDrive",
+            "path": str(od_path),
+            "total": od_quota,
+            "free": od_quota,
+            "used": 0,
+            "is_external": False,
+            "is_cloud_synced": True,
+            "description": "Auto-syncs chunks directly to Microsoft OneDrive in real-time",
+        })
+
+    if not detected_dropbox and (home / "Dropbox").exists():
+        db_path = home / "Dropbox" / "FrankensteinStorage"
+        db_quota = 2 * (1024 ** 3)
+        locations.append({
+            "name": "Dropbox",
+            "path": str(db_path),
+            "total": db_quota,
+            "free": db_quota,
+            "used": 0,
+            "is_external": False,
+            "is_cloud_synced": True,
+            "description": "Auto-syncs chunks directly to Dropbox in real-time",
+        })
 
     return locations
 
@@ -518,7 +609,43 @@ def add_drive(
             "simulated_offline": False,
         }
 
-    # Local folder provider
+    # S3-Compatible Object Storage (Cloudflare R2, AWS S3, MinIO, Backblaze B2)
+    if provider_type in ("s3", "r2", "minio", "b2") or (raw_path and raw_path.startswith("s3://")):
+        config_obj = config if isinstance(config, dict) else (json.loads(config) if config else {})
+        bucket = config_obj.get("bucket", "frankenstein-vault").strip()
+        prefix = config_obj.get("prefix", "chunks/").strip("/")
+        
+        clean_path = raw_path if (raw_path and raw_path.startswith("s3://")) else f"s3://{bucket}/{prefix}".rstrip("/")
+
+        provider = S3StorageProvider(config=config_obj, simulated_offline=False)
+        if not provider.check_availability():
+            raise AppError(400, "DRIVE_NOT_ACCESSIBLE", f"Could not connect to {provider.provider_variant} bucket '{bucket}'. Verify credentials/endpoint.")
+
+        config_json = json.dumps(config_obj)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM drives WHERE path = ?", (clean_path,))
+        if cursor.fetchone():
+            raise AppError(409, "DRIVE_EXISTS", f"Drive '{clean_name}' ({clean_path}) is already registered")
+
+        conn.execute(
+            """INSERT INTO drives (id, display_name, path, status, simulated_offline, provider_type, config)
+               VALUES (?, ?, ?, 'online', 0, ?, ?)""",
+            (drive_id, clean_name, clean_path, provider_type, config_json),
+        )
+        conn.execute(
+            "INSERT INTO operation_log (operation, details, status) VALUES (?, ?, ?)",
+            ("ADD_DRIVE", f"Added {provider.provider_variant} {clean_name} ({clean_path})", "SUCCESS"),
+        )
+        return {
+            "id": drive_id,
+            "display_name": clean_name,
+            "path": clean_path,
+            "provider_type": provider_type,
+            "status": "online",
+            "simulated_offline": False,
+        }
+
+    # Local / iCloud / OneDrive / Dropbox folder provider
     if not raw_path:
         raise AppError(400, "INVALID_PATH", "Drive path cannot be empty")
 
@@ -534,22 +661,24 @@ def add_drive(
     if not provider.check_availability():
         raise AppError(400, "DRIVE_NOT_ACCESSIBLE", f"Directory '{clean_path}' cannot be created or accessed")
 
+    effective_provider_type = provider_type if provider_type in ("icloud", "onedrive", "dropbox") else "local"
+
     conn.execute(
         """INSERT INTO drives (id, display_name, path, status, simulated_offline, provider_type, config)
-           VALUES (?, ?, ?, 'online', 0, 'local', NULL)""",
-        (drive_id, clean_name, clean_path),
+           VALUES (?, ?, ?, 'online', 0, ?, NULL)""",
+        (drive_id, clean_name, clean_path, effective_provider_type),
     )
 
     conn.execute(
         "INSERT INTO operation_log (operation, details, status) VALUES (?, ?, ?)",
-        ("ADD_DRIVE", f"Added local drive {clean_name} at {clean_path}", "SUCCESS"),
+        ("ADD_DRIVE", f"Added drive {clean_name} at {clean_path} ({effective_provider_type})", "SUCCESS"),
     )
 
     return {
         "id": drive_id,
         "display_name": clean_name,
         "path": clean_path,
-        "provider_type": "local",
+        "provider_type": effective_provider_type,
         "status": "online",
         "simulated_offline": False,
     }
@@ -580,12 +709,19 @@ def patch_drive(
     else:
         new_config = row["config"]
 
+    if simulated_offline is False:
+        new_status = "online"
+    elif row["status"] == "ejected" and simulated_offline is None:
+        new_status = "ejected"
+    else:
+        new_status = "simulated_offline" if new_sim else "online"
+
     conn.execute(
-        "UPDATE drives SET simulated_offline = ?, display_name = ?, path = ?, provider_type = ?, config = ? WHERE id = ?",
-        (new_sim, new_name, new_path, new_provider, new_config, drive_id),
+        "UPDATE drives SET simulated_offline = ?, status = ?, display_name = ?, path = ?, provider_type = ?, config = ? WHERE id = ?",
+        (new_sim, new_status, new_name, new_path, new_provider, new_config, drive_id),
     )
 
-    status_desc = "simulated_offline" if new_sim else "online"
+    status_desc = new_status
     conn.execute(
         "INSERT INTO operation_log (operation, details, status) VALUES (?, ?, ?)",
         ("PATCH_DRIVE", f"Updated drive {drive_id} (name='{new_name}', path='{new_path}', simulated_offline={bool(new_sim)})", "SUCCESS"),
@@ -598,6 +734,93 @@ def patch_drive(
         "provider_type": new_provider,
         "status": status_desc,
         "simulated_offline": bool(new_sim),
+    }
+
+
+def eject_drive(conn: sqlite3.Connection, drive_id: str) -> dict[str, Any]:
+    """Safely flushes filesystem buffers, unmounts/ejects external USB drive via diskutil, and sets status to ejected."""
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, display_name, path, status, simulated_offline, provider_type, config FROM drives WHERE id = ?",
+        (drive_id,),
+    )
+    row = cursor.fetchone()
+    if not row:
+        raise AppError(404, "DRIVE_NOT_FOUND", f"Drive with id '{drive_id}' not found")
+
+    provider = get_drive_provider(row)
+    dev_info = provider.get_device_info() if hasattr(provider, "get_device_info") else {}
+    usage = provider.get_usage() if hasattr(provider, "get_usage") else {}
+    path_str = str(row["path"])
+    is_external = bool(
+        "/Volumes/" in path_str
+        or path_str.startswith("/Volumes/")
+        or dev_info.get("is_external")
+        or usage.get("is_external")
+    )
+    if not is_external:
+        raise AppError(
+            400,
+            "NOT_AN_EXTERNAL_DRIVE",
+            f"Drive '{row['display_name']}' is not an external USB or removable device and cannot be ejected.",
+        )
+
+    # Step 1: Flush all OS filesystem buffers
+    try:
+        os.sync()
+    except Exception:
+        pass
+
+    # Step 2: Extract base mount point from drive path (e.g. /Volumes/HP from /Volumes/HP/FrankensteinStorage)
+    path_obj = Path(path_str)
+    mount_point = None
+    vol_name = path_obj.name
+    if "/Volumes/" in path_str:
+        idx = path_str.index("/Volumes/")
+        rel = path_str[idx + len("/Volumes/"):].strip("/")
+        vol_name = rel.split("/")[0] if rel else path_obj.name
+        mount_point = Path("/Volumes") / vol_name
+    elif dev_info.get("volume_name"):
+        vol_name = str(dev_info.get("volume_name")).replace("External USB: ", "").strip()
+        mount_point = Path(dev_info.get("mount_point") or path_obj)
+    else:
+        mount_point = path_obj
+
+    # Step 3: Execute safe macOS disk ejection using diskutil
+    try:
+        res = subprocess.run(
+            ["diskutil", "eject", str(mount_point)],
+            capture_output=True,
+            text=True,
+            timeout=10.0,
+        )
+        if res.returncode != 0:
+            subprocess.run(
+                ["diskutil", "unmount", str(mount_point)],
+                capture_output=True,
+                text=True,
+                timeout=10.0,
+            )
+    except Exception:
+        pass
+
+    # Step 4: Update drive status in SQLite drives table to 'ejected' (with simulated_offline = 1)
+    conn.execute(
+        "UPDATE drives SET status = 'ejected', simulated_offline = 1 WHERE id = ?",
+        (drive_id,),
+    )
+
+    # Step 5: Log operation
+    conn.execute(
+        "INSERT INTO operation_log (operation, details, status) VALUES (?, ?, ?)",
+        ("EJECT_DRIVE", f"Safely ejected USB drive {vol_name} ({drive_id})", "SUCCESS"),
+    )
+
+    return {
+        "status": "ejected",
+        "drive_id": drive_id,
+        "volume_name": vol_name,
+        "message": f"USB Drive '{vol_name}' safely unmounted. You can now physically unplug your pendrive.",
     }
 
 

@@ -11,8 +11,8 @@ export interface Drive {
   id: string;
   display_name: string;
   path: string;
-  provider_type?: "local" | "gdrive";
-  status: "online" | "simulated_offline" | "unavailable" | "offline" | "low_space";
+  provider_type?: "local" | "gdrive" | "s3" | "r2" | "minio" | "b2" | "icloud" | "onedrive" | "dropbox";
+  status: "online" | "simulated_offline" | "unavailable" | "offline" | "low_space" | "ejected";
   simulated_offline: boolean;
   available: boolean;
   usage: DriveUsage;
